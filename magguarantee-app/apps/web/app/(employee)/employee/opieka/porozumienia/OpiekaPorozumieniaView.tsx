@@ -8,17 +8,19 @@
 //
 // One <GuaranteeComplianceBoard> for both roles — the API scopes the rows
 // (admin → all carriers; opiekun → only supervised carriers), so there is no
-// role branching here. Page-level role gating is inherited from
-// `(employee)/layout.tsx` (admin + pracownik + opiekun); pracownik has no nav
-// entry and would see the board's own error/empty state if they typed the URL
-// (the API returns 403 for them).
+// role branching here. This is the client view of the route; the route's own
+// `page.tsx` (same directory) gates it server-side with
+// `requirePermission('panel.opiekun', { onDenied: 'forbidden' })`, mirrored at
+// the edge by the `/employee/opieka` rule (`PATH_PERMISSIONS` in
+// `lib/roles.ts`), so a pracownik gets «Brak dostępu» instead of the board's
+// error state (UWAGI #17).
 
 import { useTranslations } from 'next-intl';
 
 import { GuaranteeComplianceBoard } from '@/components/guarantee/GuaranteeComplianceBoard';
 import { OpiekaTabsNav } from '@/components/opieka/OpiekaTabsNav';
 
-export default function OpiekaPorozumieniaPage() {
+export default function OpiekaPorozumieniaView() {
   const t = useTranslations('guarantee.board');
 
   return (

@@ -1,6 +1,12 @@
 'use client';
 
 // Admin CRUD — carriers.
+//
+// Client view of `/employee/carriers`; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('carriers.read',
+// { onDenied: 'forbidden' })`, mirrored at the edge by `PATH_PERMISSIONS` in
+// `lib/roles.ts` (UWAGI #17). The opiekun reaches it too (Phase 5.1) — rows
+// are ownership-scoped by the API.
 
 import {
   Building2,
@@ -42,18 +48,18 @@ import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { CarrierFormDialog } from './CarrierFormDialog';
 
-export default function CarriersPage() {
+export default function CarriersView() {
   // The wizard's state lives in a Context so the page, the table cells
   // (Continue setup button), and the wizard itself all share the same store.
   return (
     <CarrierOnboardingProvider>
-      <CarriersPageInner />
+      <CarriersViewInner />
       <CarrierOnboardingWizard />
     </CarrierOnboardingProvider>
   );
 }
 
-function CarriersPageInner() {
+function CarriersViewInner() {
   const t = useTranslations('carriers');
   const tWizard = useTranslations();
   const tCommon = useTranslations('common');

@@ -1,6 +1,12 @@
 'use client';
 
 // Admin CRUD — trailers.
+//
+// Client view of `/employee/trailers`; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('trailers.read',
+// { onDenied: 'forbidden' })`, mirrored at the edge by `PATH_PERMISSIONS` in
+// `lib/roles.ts` (UWAGI #17). The opiekun reaches it too (Phase 5.1) — rows
+// are ownership-scoped by the API.
 
 import { Container, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -32,7 +38,7 @@ import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { TrailerFormDialog } from './TrailerFormDialog';
 
-export default function TrailersPage() {
+export default function TrailersView() {
   const t = useTranslations('trailers');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
@@ -42,7 +48,7 @@ export default function TrailersPage() {
   // mandatory powód (`DELETE /trailers/:id/hard`); everyone else runs a SOFT
   // delete of their own trailer (`DELETE /trailers/:id`, sets `deletedAt`,
   // restorable server-side). Carriers are the exception — there opiekun gets
-  // no delete at all (see carriers/page.tsx).
+  // no delete at all (see carriers/CarriersView.tsx).
   const canDelete = useCan('fleet.write');
   const canHardDelete = useCan('fleet.hard_delete');
   const [search, setSearch] = useState('');

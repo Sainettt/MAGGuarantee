@@ -119,10 +119,16 @@ export const ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
  * The edge only knows the JWT role, so the check is the role catalog with
  * `lider = false` and no per-user overrides (docs/25 R3) — the server pages
  * re-check the EFFECTIVE list from `/auth/me` (`requirePermission`).
- * `roles.test.ts` pins `isAllowedForRole` to the role lists this replaced.
+ * `roles.test.ts` pins `isAllowedForRole` to the role lists this replaced
+ * plus the UWAGI #17 additions, and checks the edge against the nav.
  *
- * Phase 5.1 — `carriers`, `vehicles`, `drivers`, `trailers` are reachable by
- * `opiekun` (ownership-scoped by the API), so they are not listed here.
+ * Decision 2026-10-27 (UWAGI #17) — every employee nav page has its edge twin
+ * here, keyed by the permission of its `EMPLOYEE_NAV` entry, so a typed URL is
+ * bounced to the landing instead of rendering page chrome over a 403. The
+ * opiekun still reaches `carriers`, `vehicles`, `drivers`, `trailers` (Phase
+ * 5.1, ownership-scoped by the API) — they are listed because the pracownik
+ * must not. Per-user overrides are invisible here (R3): an opiekun whose
+ * `panel.opiekun` was revoked passes the edge and is stopped by the page.
  */
 export const PATH_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
   // Catalog of trailer types — admin only (docs/03-roles.md).
@@ -150,6 +156,20 @@ export const PATH_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
   // GET /claims/:nrZgl). Closes the edge layer for a typed URL or a stale
   // `?nrZgl=` deeplink; the page's `requirePermission` is the server twin.
   '/employee/claims': ['claims.read'],
+  // Decision 2026-10-27, UWAGI #17 — the edge twins of the remaining nav
+  // pages (role catalog only; each page re-checks with `requirePermission`).
+  // Dashboard: admin + pracownik; the opiekun lands on «Moja opieka».
+  '/employee/dashboard': ['dashboard.read'],
+  // «Moja opieka» — covers `/carriers/[login]`, `/porozumienia` and
+  // `/delegations` (that page re-checks `delegations.read` itself).
+  '/employee/opieka': ['panel.opiekun'],
+  '/employee/alerts': ['panel.opiekun'],
+  '/employee/moje-pojazdy': ['km.read'],
+  // Fleet CRUD — admin + opiekun (ownership-scoped by the API); not pracownik.
+  '/employee/carriers': ['carriers.read'],
+  '/employee/vehicles': ['vehicles.read'],
+  '/employee/drivers': ['drivers.read'],
+  '/employee/trailers': ['trailers.read'],
 };
 
 /**

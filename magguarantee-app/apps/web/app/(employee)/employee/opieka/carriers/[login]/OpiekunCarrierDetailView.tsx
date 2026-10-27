@@ -2,6 +2,11 @@
 
 // Phase 5 — opiekun drill-down for a single carrier.
 //
+// Client view of the route; the route's own `page.tsx` (same directory) gates
+// it server-side with `requirePermission('panel.opiekun', { onDenied:
+// 'forbidden' })`, mirrored at the edge by the `/employee/opieka` rule
+// (`PATH_PERMISSIONS` in `lib/roles.ts`) — UWAGI #17.
+//
 // Route: `/employee/opieka/carriers/[login]`. We use the login (not the UUID)
 // in the URL so the path is human-readable for opiekuni who know their
 // carriers by login. The carrier UUID is then resolved client-side from the
@@ -64,7 +69,7 @@ import {
   type QueryErrorProps,
 } from '@/lib/query/queryErrorProps';
 
-export default function OpiekaCarrierDetailPage() {
+export default function OpiekunCarrierDetailView() {
   const params = useParams<{ login: string }>();
   const login = decodeURIComponent(params.login ?? '');
   const t = useTranslations('opieka');
@@ -339,7 +344,7 @@ export default function OpiekaCarrierDetailPage() {
 
 // ─── Sub-tables (read-only) ─────────────────────────────────
 //
-// We do NOT pull in the admin VehiclesPage / DriversPage / TrailersPage
+// We do NOT pull in the admin VehiclesView / DriversView / TrailersView
 // components because those are interactive (edit Sheet, hard-delete dialog,
 // filters tied to admin-only carrier dropdowns). Instead, we render the same
 // DataTable primitive with a curated read-only column set — same row height,

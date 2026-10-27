@@ -1,7 +1,7 @@
 'use client';
 
 // Phase 4.4 — admin user-management list view. Mirrors the
-// CarriersPage layout (server-component page → client list view), with
+// carriers screen layout (server-component page → client list view), with
 // three row-actions: Edit / Reset password / Deactivate-reactivate.
 // Bulk actions are out of scope.
 

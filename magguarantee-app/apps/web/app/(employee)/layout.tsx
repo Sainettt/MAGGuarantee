@@ -9,9 +9,12 @@
 //
 // Auth/role gating happens server-side via `requireRoleAccess()` (which
 // round-trips the API for the source-of-truth user record), with edge
-// middleware as a first line of defense. Admin-only sub-segments
-// (`carriers`, `vehicles`, `drivers`, `trailers`, `trailer-types`) have
-// their own nested guard at `(admin)/layout.tsx`.
+// middleware as a first line of defense. On top of that, every page of the
+// shell gates its own permission server-side (UWAGI #17): `requirePermission`
+// in its `page.tsx`, or in the sibling `layout.tsx` for the three client
+// pages of the `(admin)` group (sso, teams, trailer-types), with its edge
+// twin in `PATH_PERMISSIONS` (`lib/roles.ts`). `lib/auth/pageGates.test.ts`
+// fails on a page without one.
 //
 // Nav filtering happens here in the server context — what a given user
 // can't see isn't shipped to the client at all. It runs on the user's

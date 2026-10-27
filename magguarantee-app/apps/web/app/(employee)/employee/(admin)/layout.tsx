@@ -19,8 +19,9 @@
 //
 // Phase 5.1 moved carriers / vehicles / drivers / trailers OUT of this
 // group — opiekun can now reach them (CRUD ownership-scoped by the API).
-// They live directly under `/employee/<entity>/` and rely on the parent
-// `(employee)/layout.tsx` guard plus per-row API enforcement.
+// They live directly under `/employee/<entity>/` and carry their own
+// `requirePermission('<entity>.read')` in `page.tsx` plus an edge rule in
+// `PATH_PERMISSIONS` (UWAGI #17); the API still enforces row ownership.
 //
 // docs/25 §3 B4: the segment admits a user holding AT LEAST ONE of
 // `ADMIN_SECTION_PERMISSIONS` (today: admin only), resolved server-side from

@@ -495,7 +495,7 @@
   "forbidden": {
     "title": "Brak dostępu",
     "message": "Nie masz uprawnień do tej sekcji. Skontaktuj się z administratorem, jeśli uważasz, że to błąd.",
-    "backToDashboard": "Wróć do dashboardu"
+    "backToDashboard": "Wróć na stronę główną"
   },
   "wizard": {
     "ariaLabel": "Postęp dodawania przewoźnika",

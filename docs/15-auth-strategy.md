@@ -782,6 +782,7 @@ export function useAuth(): UseAuthResult {
 | `lib/hooks/useCan.ts` (client) | `usePermissions()` — список пользователя (пустой, пока `/me` грузится, и у анонима); `useCan(rule)` — any-of, `false` без пользователя |
 | `lib/auth/server.ts` (Server Components) | `requirePermission(rule, { onDenied: 'landing' \| 'forbidden' })`: аноним → `/login?next=…`, нет права → landing роли или `/employee/forbidden`. `requireRoleAccess(roles)` остаётся в layouts групп — панель это роль |
 | `lib/nav.config.ts` | `filterNav(permissions, role)`: пункт меню по `permission`, в пределах ролей employee-shell (scope) |
+| страницы employee-shell (с 2026-10-27, UWAGI #17) | каждая `page.tsx` под `app/(employee)/employee/` вызывает `requirePermission` с правом своей записи в `nav.config.ts` (client-страницы — тонкий серверный shell + `*View.tsx`; у трёх client-страниц `(admin)` гейт в соседнем `layout.tsx`); edge дублирует каждый пункт меню в `PATH_PERMISSIONS`. Tripwire `lib/auth/pageGates.test.ts` (страница без гейта) и golden-тест «edge ≡ nav по ролям» в `roles.test.ts` |
 
 Capability (кнопка hard-delete, колонка ставок) → `useCan` / `requirePermission`;
 scope (какая панель, какой список) → роль.

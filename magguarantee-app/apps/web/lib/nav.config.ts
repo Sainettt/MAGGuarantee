@@ -16,7 +16,8 @@
 //
 // Per-path access control (direct-URL navigation) is enforced separately
 // in `lib/roles.ts` (`isAllowedForRole` / `PATH_PERMISSIONS`) and re-checked
-// by each admin segment's `layout.tsx` / page server-side.
+// server-side by every page (`requirePermission` — UWAGI #17). `roles.test.ts`
+// pins the edge to this array, `lib/auth/pageGates.test.ts` the page gates.
 
 import type { Role } from '@magguarantee/shared';
 

@@ -1,10 +1,14 @@
 // Phase 4 — 403 landing inside the employee shell. Renders *inside* the
 // shell (sidebar + header still visible) so the user has obvious recovery
-// paths (their nav, the back-to-dashboard CTA).
+// paths (their nav, the back-to-home CTA).
 //
-// Reached when a non-admin tries to open an admin-only segment
-// (`/employee/carriers`, `/vehicles`, etc.) — see
-// `(employee)/employee/(admin)/layout.tsx`.
+// Reached from any employee-shell page whose permission the user lacks
+// (`requirePermission(…, { onDenied: 'forbidden' })`), including a right
+// revoked per user (docs/25 B6) that the edge, knowing the role catalog
+// only, let through — and from `/employee` when no nav entry is left
+// (`employeeLandingPath`). The CTA goes to `/employee`, which picks the first
+// entry the user can see (an opiekun has no `dashboard.read`). This page is
+// never gated, so it cannot loop.
 
 import { ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
@@ -29,7 +33,7 @@ export default async function ForbiddenPage() {
         <p className="mt-2 text-[14px] text-text-sub">{t('message')}</p>
         <div className="mt-6">
           <Link
-            href="/employee/dashboard"
+            href="/employee"
             className="inline-flex items-center justify-center gap-2 rounded-[10px] font-bold transition-colors bg-brand text-white hover:bg-brand-dark h-11 px-4 text-[14px] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
           >
             {t('backToDashboard')}

@@ -8,12 +8,12 @@
 // strip up top. Backed by `GET /fleet/opiekun` — see
 // `packages/shared/src/schemas/fleet.ts` for the full DTO shape.
 //
-// Page-level role gating is handled by the parent `/employee/layout.tsx`
-// (admin + pracownik + opiekun all reach this layout); the API itself returns
-// 403 for any other role, so we don't add a redundant guard here. Pracownik
-// can technically resolve this URL but their nav doesn't show it; they would
-// see a generic «failed to load» state — acceptable for now since direct
-// typing is the only way to land here.
+// This is the client view of the route; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('panel.opiekun',
+// { onDenied: 'forbidden' })` — the permission of the nav entry — and the
+// edge mirrors the rule (`PATH_PERMISSIONS` in `lib/roles.ts`). A pracownik,
+// or an opiekun whose `panel.opiekun` was revoked, gets the «Brak dostępu»
+// page instead of this view (UWAGI #17); the API's 403 stays the last layer.
 //
 // Phase 5.2 redesign — carriers are now rendered as a responsive card grid
 // (see `<OpiekunCarrierCard>`) instead of an 8-column DataTable. The KPI
@@ -42,7 +42,7 @@ import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { vehiclesListHref } from '@/lib/vehicles-filter';
 
-export default function OpiekaPage() {
+export default function OpiekaView() {
   const t = useTranslations('opieka');
   const tVehStatus = useTranslations('vehicleStatus');
   const fleetQ = useOpiekunFleet();

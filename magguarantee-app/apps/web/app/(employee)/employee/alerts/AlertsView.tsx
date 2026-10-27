@@ -6,11 +6,13 @@
 // vehicle / driver document whose expiry is within a week — or already past —
 // grouped into three zones and topped with a per-severity summary strip.
 //
-// Page-level role gating is the parent `/employee/layout.tsx` (the nav entry
-// is admin+opiekun only); the API returns 403 for any other role, so there is
-// no redundant guard here — a stray direct-URL visitor just sees the error
-// state. The classification is computed server-side against today, so this
-// page is always current on load (no cron, no stale badge).
+// This is the client view of the route; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('panel.opiekun',
+// { onDenied: 'forbidden' })` — the permission of the nav entry — and the
+// edge mirrors the rule (`PATH_PERMISSIONS` in `lib/roles.ts`), so a stray
+// direct-URL visitor gets «Brak dostępu», not an error state (UWAGI #17). The
+// classification is computed server-side against today, so this page is
+// always current on load (no cron, no stale badge).
 
 import { CircleCheckBig } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -21,7 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAlerts } from '@/lib/hooks/useAlerts';
 
-export default function AlertsPage() {
+export default function AlertsView() {
   const t = useTranslations('alerts');
   const { data, isLoading, isError } = useAlerts();
 

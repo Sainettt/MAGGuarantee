@@ -767,6 +767,7 @@ Pattern:
 - Список ссылок строится из конфига `nav.config.ts`, каждая запись — `{ href, label, icon, permission: Permission | Permission[] (any-of), roles?: Role[] }` (с трека B B4, 2026-10-23; до этого `roles: Role[]`). `roles` — редкий scope-квалификатор (сегодня только `opieka-delegations` → opiekun, `delegations` → admin).
 - Фильтрация в layout server-component: `filterNav(effectivePermissionsOf(user), user.role)` — права из `/auth/me.permissions` (fallback `permissionsFor(role, lider)` при расхождении версий api/web), плюс ограничение на роли employee-shell (планиста с `vehicles.read` вкладку не получает — панель это роль). Золотой тест `lib/nav.config.test.ts` фиксирует набор вкладок по ролям.
 - Никакого client-side hide через CSS. Что роль не видит — не рендерится.
+- Прямой URL закрыт так же, как вкладка: каждая страница employee-shell проверяет своё право на сервере (`requirePermission`, то же право, что у её записи в `nav.config.ts`; нет права → `/employee/forbidden`), а edge дублирует это по каталогу роли в `PATH_PERMISSIONS`. Страница никогда не рендерит каркас с 403 от API. Tripwire — `lib/auth/pageGates.test.ts` (с 2026-10-27, UWAGI #17).
 - Активное состояние ссылки — `bg-brand-50 text-brand` light / `bg-brand/15 text-brand-light` dark.
 
 ### Phase 2 confirmation
@@ -1210,6 +1211,7 @@ Zmiana działa od następnej akcji użytkownika i trafia do audytu.
 - `pracownik` видит: `Dashboard`, `Wnioski`. **Точка.**
 - `admin` видит: `Dashboard`, `Wnioski`, `Carriers`, `Vehicles`, `Drivers`, `Trailers`, `Trailer types`, `Limity`, `Users`, `Audit log`.
 - Фильтрация — в server-component layout, не на клиенте.
+- Прямой URL: каждая страница гейтится `requirePermission` на сервере, edge — `PATH_PERMISSIONS`; см. §Role-gated navigation (2026-10-27).
 - Active link styling — как в Phase 2 (`bg-brand-50 text-brand` light / `bg-brand/15 text-brand-light` dark).
 
 ### Phase 4 acceptance checklist (для web-agent)

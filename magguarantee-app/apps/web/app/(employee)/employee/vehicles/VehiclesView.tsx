@@ -4,6 +4,12 @@
 // (per the Phase 2 spec — don't gold-plate). The full 36-field edit happens
 // in the sheet.
 //
+// Client view of `/employee/vehicles`; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('vehicles.read',
+// { onDenied: 'forbidden' })`, mirrored at the edge by `PATH_PERMISSIONS` in
+// `lib/roles.ts` (UWAGI #17). The opiekun reaches it too (Phase 5.1) — rows
+// are ownership-scoped by the API.
+//
 // docs/14 §15 — this list is the drill-down target of the «Moja opieka» KPI
 // tiles, so its two deep-linkable filters (lifecycle status + carrier) live in
 // the URL (`?status=` / `?carrier=`), not in component state: a tile link, the
@@ -46,7 +52,7 @@ import { VehicleFormDialog } from './VehicleFormDialog';
 // TODO: GpsStatus column when Phase 5 fleet UI lands
 // (locked spec in docs/14-design-system.md § GPS status indicator).
 
-export default function VehiclesPage() {
+export default function VehiclesView() {
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');

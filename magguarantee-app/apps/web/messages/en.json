@@ -495,7 +495,7 @@
   "forbidden": {
     "title": "Access denied",
     "message": "You don't have permission to view this section. Contact your administrator if you believe this is a mistake.",
-    "backToDashboard": "Back to dashboard"
+    "backToDashboard": "Back to home"
   },
   "wizard": {
     "ariaLabel": "Carrier onboarding progress",

@@ -1,6 +1,12 @@
 'use client';
 
 // Admin CRUD — drivers.
+//
+// Client view of `/employee/drivers`; the route's own `page.tsx` (same
+// directory) gates it server-side with `requirePermission('drivers.read',
+// { onDenied: 'forbidden' })`, mirrored at the edge by `PATH_PERMISSIONS` in
+// `lib/roles.ts` (UWAGI #17). The opiekun reaches it too (Phase 5.1) — rows
+// are ownership-scoped by the API.
 
 import { Pencil, Plus, SearchX, Trash2, UserRound } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -31,7 +37,7 @@ import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { DriverFormDialog } from './DriverFormDialog';
 
-export default function DriversPage() {
+export default function DriversView() {
   const t = useTranslations('drivers');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
@@ -41,7 +47,7 @@ export default function DriversPage() {
   // mandatory powód (`DELETE /drivers/:id/hard`); everyone else runs a SOFT
   // delete of their own driver (`DELETE /drivers/:id`, sets `deletedAt`,
   // restorable server-side). Carriers are the exception — there opiekun gets
-  // no delete at all (see carriers/page.tsx).
+  // no delete at all (see carriers/CarriersView.tsx).
   const canDelete = useCan('fleet.write');
   const canHardDelete = useCan('fleet.hard_delete');
   const [search, setSearch] = useState('');
