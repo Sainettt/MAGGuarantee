@@ -60,7 +60,7 @@ import {
   FormSection,
 } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatDateFull, formatWallClockDate } from '@/lib/format/numbers';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
 import { useClaimableDelegations } from '@/lib/hooks/useDelegations';
@@ -468,10 +468,15 @@ export default function NewClaimPage() {
                       // B (hybrid): non-guaranteed outings stay SELECTABLE but
                       // get a "(bez gwarancji)" marker. Selecting one triggers
                       // the block screen + disabled submit (C).
+                      // Dates: `departureAt` is a true instant (browser-local
+                      // `formatDateFull`); the return end is wall-clock
+                      // labelled UTC (`actualReturnAt`) or date-only
+                      // (`plannedReturnAt`) → UTC-pinned `formatWallClockDate`
+                      // (docs/19 #16).
                       <option key={d.id} value={d.id}>
                         {(d.vehicle?.plateNumber ?? '—')} ·{' '}
                         {formatDateFull(d.departureAt)} →{' '}
-                        {formatDateFull(d.actualReturnAt ?? d.plannedReturnAt)}
+                        {formatWallClockDate(d.actualReturnAt ?? d.plannedReturnAt)}
                         {d.vehicle?.agreement !== true
                           ? ` · ${tPicker('noGuaranteeMarker')}`
                           : ''}

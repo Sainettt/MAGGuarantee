@@ -128,6 +128,23 @@ export function businessWallClockUtc(now: Date = new Date()): Date {
   return new Date(`${wallClock}Z`);
 }
 
+/**
+ * The calendar date of a WALL-CLOCK-LABELLED-UTC value at `T00:00Z` — its raw
+ * UTC date part, no zone conversion. The pair of {@link startOfBusinessDayUtc}
+ * (which is for TRUE instants) for the other convention on `Delegation`:
+ * `actualDepartureAt` / `actualReturnAt` and {@link businessWallClockUtc}
+ * carry a Warsaw wall-clock labelled `Z` (docs/19 #16), so their date IS the
+ * `T`-part's date. Feeding such a value through the Warsaw reduction instead
+ * moves a 23:00–23:59 CET / 22:00–23:59 CEST wall-clock onto the next day
+ * (UWAGI #26 — `daysSinceReturn` came out one short).
+ *
+ * The result is a UTC-midnight anchor like the others, so it diffs cleanly
+ * through {@link calendarDaysBetween} (which maps UTC midnight to itself).
+ */
+export function startOfWallClockDayUtc(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
 /** One calendar day in milliseconds — both operands below are UTC midnight. */
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -14,7 +14,7 @@
 
 import type { ReactNode } from 'react';
 
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatDateFull, formatWallClockDate } from '@/lib/format/numbers';
 
 /** Em-dash placeholder for null/empty values, visibly secondary (§6.5). */
 export function emptyValue(): ReactNode {
@@ -36,6 +36,18 @@ export function monoValue(value: string | null | undefined): ReactNode {
 /** Date-only value rendered via the shared full-date formatter. */
 export function dateValue(iso: string | null | undefined): ReactNode {
   return iso ? <span>{formatDateFull(iso)}</span> : emptyValue();
+}
+
+/**
+ * Wall-clock twin of `dateValue` — for values whose calendar date IS the ISO's
+ * UTC date part: wall-clock LABELLED UTC (`actualReturnAt`, and
+ * `Vehicle.lastDroveAt` copied from it) and UTC-midnight date-only values
+ * (docs/19 #16). Rendered via the UTC-pinned `formatWallClockDate`, so a 23:30
+ * return never shows as the next day in a Warsaw browser. Never for true
+ * instants — those stay on `dateValue`.
+ */
+export function wallClockDateValue(iso: string | null | undefined): ReactNode {
+  return iso ? <span>{formatWallClockDate(iso)}</span> : emptyValue();
 }
 
 /**

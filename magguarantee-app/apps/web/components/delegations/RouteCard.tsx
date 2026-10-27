@@ -8,11 +8,16 @@
 //
 // Each end carries a reported-vs-actual date pair (§6.4.1a): departure shows the
 // reported `departureAt` (datetime) + — once set — the actual `actualDepartureAt`
-// (date-only); return shows the planned `plannedReturnAt` (date-only) + — once
-// set — the actual `actualReturnAt` (date-only). The «fakt.» actual line is
-// omitted entirely when its value is null (no em-dash); the reported/planned
-// line is always shown. CRITICAL: both `actual*At` are UTC-midnight date-only
-// and MUST use the date-only helper (`formatDateFull`), never `formatDateTime`.
+// (date-only, docs/14 §6.4.1a); return shows the planned
+// `plannedReturnAt` (date-only) + — once set — the actual `actualReturnAt`
+// (date-only, mirroring the planned line). The «fakt.» actual line is omitted
+// entirely when its value is null (no em-dash); the reported/planned line is
+// always shown. CRITICAL: the two `actual*At` are wall-clock LABELLED UTC (the
+// weryfikator types 23:30, the api stores `…T23:30:00Z` — docs/19 #16), so they
+// MUST use the UTC-pinned `formatWallClock*` helpers; the browser-local
+// `formatDateFull` / `formatDateTime` would shift them by the viewer's offset
+// (23:30 → next day in Warsaw). `departureAt` is a true instant and
+// `plannedReturnAt` date-only — they keep their browser-local helpers.
 //
 // It is purely presentational — it reads the already-in-hand DelegationDto, has
 // no fetch, no state, no mutation. It is slotted as the value of a `fullWidth`
@@ -25,7 +30,11 @@ import { ArrowDown, ChevronRight, Truck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { DelegationDto } from '@magguarantee/shared';
 
-import { formatDateFull, formatDateTime } from '@/lib/format/numbers';
+import {
+  formatDateFull,
+  formatDateTime,
+  formatWallClockDate,
+} from '@/lib/format/numbers';
 
 interface Props {
   delegation: DelegationDto;
@@ -124,12 +133,14 @@ export function RouteCard({ delegation }: Props) {
         value={formatDateTime(delegation.departureAt)}
       />
       {/* Actual line — only once `actualDepartureAt` is set (on `w_trasie`).
-          It is UTC-midnight date-only → the DATE-ONLY helper (formatDateFull),
-          NEVER formatDateTime (phantom-02:00 bug, §6.4.1a ⚠️). */}
+          Wall-clock LABELLED UTC (docs/19 #16) → the UTC-pinned wall-clock
+          helper, NEVER the browser-local formatDateTime / formatDateFull (they
+          re-apply the viewer's offset: 23:30 → next day). Date-only per
+          docs/14 §6.4.1a. */}
       {delegation.actualDepartureAt && (
         <DateLine
           prefix={t('actualPrefix')}
-          value={formatDateFull(delegation.actualDepartureAt)}
+          value={formatWallClockDate(delegation.actualDepartureAt)}
           tone="actual"
         />
       )}
@@ -151,11 +162,13 @@ export function RouteCard({ delegation }: Props) {
         value={formatDateFull(delegation.plannedReturnAt)}
       />
       {/* Actual line — only once `actualReturnAt` is set (on `zjechal`).
-          UTC-midnight date-only → date-only helper (same phantom-02:00 fix). */}
+          Wall-clock LABELLED UTC (docs/19 #16) → UTC-pinned wall-clock date
+          helper (browser-local would print 23:30 as the next day). Date-only,
+          mirroring the planned line above. */}
       {delegation.actualReturnAt && (
         <DateLine
           prefix={t('actualPrefix')}
-          value={formatDateFull(delegation.actualReturnAt)}
+          value={formatWallClockDate(delegation.actualReturnAt)}
           tone="actual"
         />
       )}

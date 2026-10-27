@@ -84,7 +84,9 @@ export function markDelegationReady(
 
 /**
  * POST /delegations/:id/in-transit — weryfikator|admin. `gotowy → w_trasie`.
- * `actualDepartureAt` is date-only (`YYYY-MM-DD`) — the ACTUAL start of the
+ * `actualDepartureAt` is a wall-clock datetime LABELLED UTC (the weryfikator's
+ * typed `HH:mm` + `:00Z`, e.g. `2026-08-01T08:30:00Z` — see
+ * `lib/format/datetimeLocal.ts`, docs/19 #16) — the ACTUAL start of the
  * guarantee period, so the server auto-recalcs the linked wniosek. The api
  * re-validates it (not in the future, not before the reported `departureAt`).
  */
@@ -100,8 +102,9 @@ export function markDelegationInTransit(
 
 /**
  * POST /delegations/:id/returned — weryfikator|admin. `w_trasie → zjechal`.
- * `actualReturnAt` is date-only (`YYYY-MM-DD`). Server-side side effects
- * (`vehicle.lastDroveAt` bump + linked-wniosek auto-recalc) are invisible here.
+ * `actualReturnAt` is a wall-clock datetime LABELLED UTC (same convention as
+ * `actualDepartureAt` above). Server-side side effects (`vehicle.lastDroveAt`
+ * bump + linked-wniosek auto-recalc) are invisible here.
  */
 export function markDelegationReturned(
   id: string,

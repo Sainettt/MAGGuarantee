@@ -57,10 +57,10 @@ import {
 } from '@/components/ui/EntityDetailModal';
 import {
   boolValue,
-  dateValue,
   listValue,
   monoValue,
   textValue,
+  wallClockDateValue,
 } from '@/components/ui/entity-detail-values';
 import { downloadVehicleAttachment } from '@/lib/api/vehicles';
 import { formatDateTime, formatEur } from '@/lib/format/numbers';
@@ -294,7 +294,12 @@ export function VehicleDetailModal({
       title: t('sections.other'),
       icon: Info,
       rows: [
-        { label: f('lastDroveAt'), value: dateValue(vehicle.lastDroveAt) },
+        // `lastDroveAt` = copied wall-clock-labelled-UTC `actualReturnAt` or a
+        // UTC-midnight km day → UTC-pinned date helper (docs/19 #16).
+        {
+          label: f('lastDroveAt'),
+          value: wallClockDateValue(vehicle.lastDroveAt),
+        },
         { label: f('notes'), value: textValue(vehicle.notes) },
       ],
     },

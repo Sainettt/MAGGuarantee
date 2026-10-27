@@ -7,7 +7,7 @@
 // REWORK 2026-06-20 #4: the weryfikator drives the two final operational
 // transitions:
 //   • `gotowy` rows → «Oznacz w trasie» (dialog C, plain confirm → /in-transit),
-//   • `w_trasie` rows → «Oznacz zjechał» (dialog D, date-only `actualReturnAt`
+//   • `w_trasie` rows → «Oznacz zjechał» (dialog D, wall-clock `actualReturnAt`
 //     pre-filled with `plannedReturnAt`, future-date guarded → /returned).
 // At most ONE primary action per row (strict state machine, §7.10.2). Cancel is
 // carrier/admin-only and is NOT here. Side effects of /returned (vehicle

@@ -9,7 +9,9 @@ import type { VehicleDelegationStatus } from './vehicle-delegation-status.reposi
  * The two DERIVED lifecycle fields surfaced on the vehicle DTOs / fleet items.
  * `status` is the read-time classification; `daysSinceReturn` is the calendar
  * days since the idle anchor (`null` when no idle clock runs — `wylaczona` /
- * `aktywna`).
+ * `aktywna`). The anchor day is the raw date part of the wall-clock-labelled
+ * `lastReturnAt`, else the Warsaw date of the true-instant `createdAt`
+ * (docs/19 #16; UWAGI #26, 2026-10-27).
  */
 export interface VehicleLifecycleInfo {
   status: VehicleLifecycleStatus;

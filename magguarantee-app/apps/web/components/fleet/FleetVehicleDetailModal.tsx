@@ -33,10 +33,10 @@ import {
 } from '@/components/ui/EntityDetailModal';
 import {
   boolValue,
-  dateValue,
   listValue,
   monoValue,
   textValue,
+  wallClockDateValue,
 } from '@/components/ui/entity-detail-values';
 
 interface Props {
@@ -149,7 +149,12 @@ export function FleetVehicleDetailModal({
       span: 'full',
       rows: [
         // Quirk #11 — display-only, never editable; fine to show here.
-        { label: tFields('lastDroveAt'), value: dateValue(vehicle.lastDroveAt) },
+        // Copied wall-clock-labelled-UTC `actualReturnAt` or a UTC-midnight km
+        // day → UTC-pinned date helper (docs/19 #16).
+        {
+          label: tFields('lastDroveAt'),
+          value: wallClockDateValue(vehicle.lastDroveAt),
+        },
         // Phase 11 — dispatch-team composition (non-sensitive — no rates, so
         // not blocked by the §6.4.2 HARD EXCLUSION). The slim VehicleListItem
         // now carries `dispatchTeam`, so the read-only panel shows it too.

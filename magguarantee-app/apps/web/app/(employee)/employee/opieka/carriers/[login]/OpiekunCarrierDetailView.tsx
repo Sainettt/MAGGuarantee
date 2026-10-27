@@ -54,7 +54,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { CarrierPorozumieniaTab } from './CarrierPorozumieniaTab';
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatWallClockDate } from '@/lib/format/numbers';
 import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
 import { listVehicles } from '@/lib/api/vehicles';
@@ -422,8 +422,10 @@ function VehiclesTable({
       {
         id: 'lastDroveAt',
         header: t('columns.lastDroveAt'),
+        // `lastDroveAt` is a copied wall-clock-labelled-UTC `actualReturnAt` or a
+        // UTC-midnight km day — UTC-pinned date helper (docs/19 #16).
         cell: (row) => (
-          <span className="tabular-nums">{formatDateFull(row.lastDroveAt)}</span>
+          <span className="tabular-nums">{formatWallClockDate(row.lastDroveAt)}</span>
         ),
       },
       {

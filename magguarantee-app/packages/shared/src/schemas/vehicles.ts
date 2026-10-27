@@ -77,8 +77,11 @@ const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
  *   - `do_usuniecia` — …idle ≥29 calendar days (overdue for removal review).
  *
  * Days are CALENDAR days (Europe/Warsaw) from the anchor
- * `max(actualReturnAt over zjechał) ?? Vehicle.createdAt`. Reused by both the
- * full `VehicleDto` and the slim fleet list items (per-row badge).
+ * `max(actualReturnAt over zjechał) ?? Vehicle.createdAt`. The return anchor is
+ * a Warsaw wall-clock LABELLED UTC (docs/19 #16) and is reduced by its raw date
+ * part (`startOfWallClockDayUtc`); `createdAt` is a true instant reduced to
+ * its Warsaw date (UWAGI #26, 2026-10-27). Reused by both the full
+ * `VehicleDto` and the slim fleet list items (per-row badge).
  */
 export const VehicleLifecycleStatusSchema = z.enum([
   'wylaczona',

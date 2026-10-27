@@ -187,6 +187,7 @@ export class VehicleRemovalAlertService implements OnModuleInit {
           due.push({
             vehicle: v,
             daysSinceReturn: lifecycle.daysSinceReturn ?? REMOVAL_THRESHOLD_DAYS,
+            // Already the reduced day (UTC midnight) for both sources → UTC label is right.
             anchorAt: lifecycle.anchorAt ?? v.createdAt,
           });
         }

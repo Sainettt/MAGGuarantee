@@ -150,7 +150,7 @@
 
 **Операционный статус — производный (не хранится):** статус авто вычисляется на read-стороне из выездов + `createdAt`, отдельной колонки статуса НЕТ.
 - `aktywna` — есть НЕ-терминальный `Delegation` (`status ∈ {zgloszony, gotowy, w_trasie}`).
-- Иначе якорь = `max(Delegation.actualReturnAt по zjechal, не soft-deleted) ?? Vehicle.createdAt`; `daysSinceReturn` = **календарные** дни от якоря до сегодня: `stojąca` 0–14, `nieaktywna` 15–28, `do_usunięcia` ≥29.
+- Иначе якорь = `max(Delegation.actualReturnAt по zjechal, не soft-deleted) ?? Vehicle.createdAt`; `daysSinceReturn` = **календарные** дни от якоря до сегодня: `stojąca` 0–14, `nieaktywna` 15–28, `do_usunięcia` ≥29. Дата якоря-съезда берётся из настенного варшавского времени как есть (`startOfWallClockDayUtc`, docs/19 #16), а `createdAt` как настоящий момент приводится к варшавской дате (UWAGI #26, 2026-10-27).
 - Ежедневный cron шлёт всем активным админам письмо про каждое авто `≥29` дней (по ВСЕМ авто, не только гарантийным), повтор раз в 3 календарных дня; дедуп через `Vehicle.adminRemovalNotifiedAt` / `adminRemovalNotifyCount` (см. [12-database-schema.md](12-database-schema.md)). Сама формула статуса и cron — в api-слое.
 - Ручной `active=false` = `wyłączona` — **ортогонален** этой шкале (админ выключил авто вручную; не путать с производной idle-эскалацией).
 

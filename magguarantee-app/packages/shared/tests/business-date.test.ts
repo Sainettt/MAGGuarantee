@@ -12,6 +12,7 @@ import {
   businessWallClockUtc,
   calendarDaysBetween,
   startOfBusinessDayUtc,
+  startOfWallClockDayUtc,
 } from '../src/domain/business-date';
 
 /** `YYYY-MM-DD` → UTC-midnight Date. */
@@ -43,6 +44,30 @@ describe('startOfBusinessDayUtc', () => {
   it('returns the UTC-midnight anchor of the instant’s Warsaw day', () => {
     const anchor = startOfBusinessDayUtc(new Date('2026-07-01T23:00:00Z'));
     expect(anchor.toISOString()).toBe('2026-07-02T00:00:00.000Z');
+  });
+});
+
+// UWAGI #26 (2026-10-27) — the reduction for the OTHER convention: a Warsaw
+// wall-clock labelled UTC keeps its raw date part.
+describe('startOfWallClockDayUtc', () => {
+  it('keeps the raw date part of a wall-clock-labelled value (no Warsaw shift)', () => {
+    // 23:30 typed by the weryfikator on 27.10 (CET) — stored as `…T23:30:00Z`.
+    const typed = new Date('2026-10-27T23:30:00Z');
+    expect(startOfWallClockDayUtc(typed).toISOString()).toBe('2026-10-27T00:00:00.000Z');
+    // The true-instant reduction moves the same value to 28.10 — the UWAGI #26 bug.
+    expect(startOfBusinessDayUtc(typed).toISOString()).toBe('2026-10-28T00:00:00.000Z');
+  });
+
+  it('CEST: 22:30 stays on its day', () => {
+    expect(startOfWallClockDayUtc(new Date('2026-07-01T22:30:00Z')).toISOString()).toBe(
+      '2026-07-01T00:00:00.000Z',
+    );
+  });
+
+  it('maps a UTC-midnight value to itself and diffs cleanly through calendarDaysBetween', () => {
+    const day = startOfWallClockDayUtc(new Date('2026-07-01T22:30:00Z'));
+    expect(startOfWallClockDayUtc(day).getTime()).toBe(day.getTime());
+    expect(calendarDaysBetween(day, U('2026-07-16'))).toBe(15);
   });
 });
 

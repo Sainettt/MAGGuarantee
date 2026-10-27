@@ -33,7 +33,7 @@ import { PermitCell } from '@/components/fleet/PermitCell';
 import { Badge } from '@/components/ui/Badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatWallClockDate } from '@/lib/format/numbers';
 import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 import { Car, Truck, User } from 'lucide-react';
 
@@ -146,8 +146,10 @@ export function FleetVehiclesTable({
       {
         id: 'lastDroveAt',
         header: t('columns.lastDroveAt'),
+        // `lastDroveAt` is a copied wall-clock-labelled-UTC `actualReturnAt` or a
+        // UTC-midnight km day — UTC-pinned date helper (docs/19 #16).
         cell: (row) => (
-          <span className="tabular-nums">{formatDateFull(row.lastDroveAt)}</span>
+          <span className="tabular-nums">{formatWallClockDate(row.lastDroveAt)}</span>
         ),
       },
       {

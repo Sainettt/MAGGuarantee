@@ -17,13 +17,22 @@
 //
 // Calendar-day convention: `daysSinceReturn` is CALENDAR days in Europe/Warsaw
 // (NOT working days — unlike the watchdog). The anchor and `today` are both
-// reduced to their Warsaw calendar date before differencing via
+// reduced to a calendar date at UTC midnight before differencing via
 // `calendarDaysBetween`, so time-of-day / DST / UTC offset never shift the
 // count. `today` is expected as `startOfBusinessTodayUtc()` (Warsaw-date UTC
-// midnight); `lastReturnAt` is the date-only UTC-midnight convention;
-// `createdAt` is a full instant reduced to its Warsaw date.
+// midnight); `createdAt` is a TRUE instant reduced to its Warsaw date
+// (`startOfBusinessDayUtc`); `lastReturnAt` is `Delegation.actualReturnAt`,
+// a Warsaw WALL-CLOCK LABELLED UTC (docs/19 #16), reduced by its raw date part
+// (`startOfWallClockDayUtc`) — the Warsaw reduction counted a return typed at
+// 23:00–23:59 CET / 22:00–23:59 CEST as the next day and left `daysSinceReturn`
+// one short (UWAGI #26, fixed 2026-10-27). The reduced day is what `anchorAt`
+// reports.
 
-import { calendarDaysBetween } from './business-date';
+import {
+  calendarDaysBetween,
+  startOfBusinessDayUtc,
+  startOfWallClockDayUtc,
+} from './business-date';
 
 // ─── Public types ────────────────────────────────────────
 
@@ -58,7 +67,10 @@ export interface VehicleLifecycleInput {
   readonly active: boolean;
   /** True while a zgloszony/gotowy/w_trasie delegation exists (anulowany/zjechał excluded). */
   readonly hasActiveDelegation: boolean;
-  /** `date(actualReturnAt)` of the latest zjechał delegation, or `null` if never. */
+  /**
+   * `actualReturnAt` of the latest zjechał delegation — a Warsaw wall-clock
+   * LABELLED UTC (docs/19 #16), or `null` if the vehicle never returned.
+   */
   readonly lastReturnAt: Date | null;
   /** `Vehicle.createdAt` — full instant, fallback anchor when never returned. */
   readonly createdAt: Date;
@@ -77,7 +89,11 @@ export interface VehicleLifecycleResult {
   readonly status: VehicleLifecycleStatus;
   /** Calendar days since the anchor (clamped ≥0), or `null` when no clock runs. */
   readonly daysSinceReturn: number | null;
-  /** The idle-clock anchor, or `null` when no clock runs. */
+  /**
+   * The idle-clock anchor as its calendar day at UTC midnight — the day
+   * `daysSinceReturn` counts from (the wall-clock date of the return, or the
+   * Warsaw date of the creation) — or `null` when no clock runs.
+   */
   readonly anchorAt: Date | null;
   /** Which input produced the anchor, or `null` when no clock runs. */
   readonly anchorSource: VehicleLifecycleAnchorSource | null;
@@ -111,8 +127,11 @@ export const VEHICLE_NIEAKTYWNA_MAX_DAYS = 28;
  *   3. Otherwise the idle clock runs from
  *      `anchor = lastReturnAt ?? createdAt` (`anchorSource` `'zjechal'` when the
  *      last return provided it, else `'created'`);
- *      `daysSinceReturn = max(0, calendarDaysBetween(anchor, today))`
- *      (clamped so a future-dated anchor can't go negative);
+ *      `daysSinceReturn = max(0, calendarDaysBetween(anchorAt, today))`, where
+ *      `anchorAt` (reported as is) is the anchor's calendar day at UTC
+ *      midnight — the raw date part of the wall-clock `lastReturnAt`, the
+ *      Warsaw date of the true-instant `createdAt` (clamped so a future-dated
+ *      anchor can't go negative);
  *      bucketed by {@link VEHICLE_STOJACA_MAX_DAYS} /
  *      {@link VEHICLE_NIEAKTYWNA_MAX_DAYS}.
  */
@@ -146,9 +165,15 @@ export function computeVehicleLifecycleStatus(
   // this — a delete+recreate must not reset the idle clock. Today the DB
   // `@@unique([carrierId, plateNumber])` blocks recreate, so a row-level anchor
   // (this vehicle's own `createdAt` / last zjechał) is observably equivalent.
-  const anchorAt = lastReturnAt ?? createdAt;
   const anchorSource: VehicleLifecycleAnchorSource =
     lastReturnAt !== null ? 'zjechal' : 'created';
+  // Two conventions, two reductions (header note): the wall-clock return keeps
+  // its raw date, the true-instant creation gets its Warsaw date. Both land on
+  // UTC midnight, which `calendarDaysBetween` maps to itself.
+  const anchorAt =
+    lastReturnAt !== null
+      ? startOfWallClockDayUtc(lastReturnAt)
+      : startOfBusinessDayUtc(createdAt);
   const daysSinceReturn = Math.max(0, calendarDaysBetween(anchorAt, today));
   const status = bucketForDays(daysSinceReturn);
 

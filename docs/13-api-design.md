@@ -627,7 +627,7 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 1. `wylaczona` — `Vehicle.active=false` (ручная деактивация; ортогональна idle-часам, из них исключена).
 2. `aktywna` — `active=true` И есть нетерминальный wyjazd (`status ∈ {zgloszony, gotowy, w_trasie}`). `vehicle_daily_km` больше **не** участвует.
-3. иначе `daysSinceReturn = max(0, calendarDaysBetween(anchor, today))`, где `anchor = max(actualReturnAt по zjechał, non-deleted) ?? Vehicle.createdAt`; дни **календарные** (Europe/Warsaw). Бакеты: `stojaca` 0–14, `nieaktywna` 15–28, `do_usuniecia` ≥29.
+3. иначе `daysSinceReturn = max(0, calendarDaysBetween(anchor, today))`, где `anchor = max(actualReturnAt по zjechał, non-deleted) ?? Vehicle.createdAt`; дни **календарные** (Europe/Warsaw). `actualReturnAt` — настенное варшавское время с меткой `Z` (docs/19 #16), его дата берётся как есть (`startOfWallClockDayUtc`); `createdAt` — настоящий момент, приводится к варшавской дате (UWAGI #26, 2026-10-27). Бакеты: `stojaca` 0–14, `nieaktywna` 15–28, `do_usuniecia` ≥29.
 
 Полный `VehicleDto` **и** slim `VehicleListItem` несут `lifecycleStatus: 'wylaczona'|'aktywna'|'stojaca'|'nieaktywna'|'do_usuniecia'` + `daysSinceReturn: number | null` (`null` для `wylaczona`/`aktywna`). Считаются сервисом одним батч-запросом delegation-статусов на страницу (без N+1); `GET /vehicles/:id` — один lookup.
 

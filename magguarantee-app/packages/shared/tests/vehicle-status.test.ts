@@ -7,11 +7,15 @@
 // any clock mocking.
 //
 // Date convention used below:
-//   - `U('YYYY-MM-DD')` → UTC midnight (the date-only convention for `today` and
-//     `lastReturnAt`; a UTC-midnight instant maps to the SAME Warsaw calendar
-//     day in both CET and CEST, so the day-count is exact).
-//   - `at('YYYY-MM-DDTHH:MM:SSZ')` → an arbitrary instant (for `createdAt`,
-//     which is a full timestamp reduced to its Warsaw calendar date).
+//   - `U('YYYY-MM-DD')` → UTC midnight (the date-only convention for `today`; a
+//     UTC-midnight instant maps to the SAME Warsaw calendar day in both CET and
+//     CEST, so the day-count is exact — and it is also a valid wall-clock
+//     `lastReturnAt`, "returned at 00:00 of that day").
+//   - `at('YYYY-MM-DDTHH:MM:SSZ')` → a full timestamp: for `createdAt` a TRUE
+//     instant reduced to its Warsaw calendar date; for `lastReturnAt` a Warsaw
+//     wall-clock LABELLED UTC (docs/19 #16) whose date is the raw `T`-part's
+//     date — see the UWAGI #26 block at the bottom. `anchorAt` reports the
+//     reduced day (UTC midnight), not the raw input.
 
 import { describe, expect, it } from 'vitest';
 
@@ -99,7 +103,7 @@ describe('computeVehicleLifecycleStatus — anchor selection', () => {
       baseInput({ lastReturnAt: null, createdAt: created }),
     );
     expect(res.anchorSource).toBe('created');
-    expect(res.anchorAt).toBe(created);
+    expect(res.anchorAt).toEqual(U('2026-07-16')); // the Warsaw day, not the instant
     // 2026-07-30 − 2026-07-16 = 14 → stojaca boundary.
     expect(res.daysSinceReturn).toBe(14);
     expect(res.status).toBe('stojaca');
@@ -112,7 +116,7 @@ describe('computeVehicleLifecycleStatus — anchor selection', () => {
       baseInput({ lastReturnAt: returned, createdAt: created }),
     );
     expect(res.anchorSource).toBe('zjechal');
-    expect(res.anchorAt).toBe(returned);
+    expect(res.anchorAt).toEqual(returned); // already a day — reported unchanged
     // Anchored on the return (15 days), NOT createdAt (which would be ~210).
     expect(res.daysSinceReturn).toBe(15);
     expect(res.status).toBe('nieaktywna');
@@ -163,5 +167,50 @@ describe('computeVehicleLifecycleStatus — day-boundary buckets', () => {
     );
     expect(res.status).toBe('do_usuniecia');
     expect(res.daysSinceReturn).toBeGreaterThan(VEHICLE_NIEAKTYWNA_MAX_DAYS);
+  });
+});
+
+// UWAGI #26 (fixed 2026-10-27): `lastReturnAt` is `Delegation.actualReturnAt`,
+// a Warsaw wall-clock LABELLED UTC (docs/19 #16). Its calendar date is the raw
+// `T`-part's date; the Warsaw reduction that `createdAt` gets would count a
+// late-evening return as the next day and leave the bucket one day behind.
+describe('computeVehicleLifecycleStatus — wall-clock lastReturnAt (UWAGI #26)', () => {
+  it.each([
+    // CET: 23:30 on 13.01 → 15 days to 28.01 (the Warsaw reduction said 14).
+    ['2026-01-13T23:30:00Z', '2026-01-28', '2026-01-13', 15, 'nieaktywna'],
+    // CEST: 22:30 on 01.07 → 15 days to 16.07 (the Warsaw reduction said 14).
+    ['2026-07-01T22:30:00Z', '2026-07-16', '2026-07-01', 15, 'nieaktywna'],
+    // CET, the 28/29 boundary: 23:59 on 01.01 → 29 days to 30.01 (was 28).
+    ['2026-01-01T23:59:00Z', '2026-01-30', '2026-01-01', 29, 'do_usuniecia'],
+    // A daytime return was never affected.
+    ['2026-07-01T14:00:00Z', '2026-07-16', '2026-07-01', 15, 'nieaktywna'],
+    // Wall-clock midnight of the day itself.
+    ['2026-07-02T00:00:00Z', '2026-07-16', '2026-07-02', 14, 'stojaca'],
+  ] as const)(
+    'lastReturnAt=%s, today=%s → anchor day %s, %d days → %s',
+    (returnIso, todayIso, anchorDayIso, expectedDays, expectedStatus) => {
+      const res = computeVehicleLifecycleStatus(
+        baseInput({ today: U(todayIso), lastReturnAt: at(returnIso) }),
+      );
+      expect(res.daysSinceReturn).toBe(expectedDays);
+      expect(res.status).toBe(expectedStatus);
+      expect(res.anchorSource).toBe('zjechal');
+      expect(res.anchorAt).toEqual(U(anchorDayIso));
+    },
+  );
+
+  it('createdAt stays a TRUE instant: the same late-evening value lands on the next Warsaw day', () => {
+    // 23:30Z on 13.01 IS 00:30 CET on 14.01 for a true instant → 14 days to 28.01.
+    const res = computeVehicleLifecycleStatus(
+      baseInput({
+        today: U('2026-01-28'),
+        lastReturnAt: null,
+        createdAt: at('2026-01-13T23:30:00Z'),
+      }),
+    );
+    expect(res.daysSinceReturn).toBe(14);
+    expect(res.status).toBe('stojaca');
+    expect(res.anchorSource).toBe('created');
+    expect(res.anchorAt).toEqual(U('2026-01-14'));
   });
 });

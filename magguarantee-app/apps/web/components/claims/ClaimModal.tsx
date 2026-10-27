@@ -139,7 +139,11 @@ import {
   shortfallView,
   type ShortfallView,
 } from '@/lib/claims/shortfall';
-import { formatDateFull, formatEur } from '@/lib/format/numbers';
+import {
+  formatDateFull,
+  formatEur,
+  formatWallClockDate,
+} from '@/lib/format/numbers';
 import {
   CLAIMS_KEY,
   useClaim,
@@ -1340,6 +1344,11 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
 
   const recalcState = claim.autoRecalcState;
 
+  // Display convention (docs/19 #16): `actual` is wall-clock LABELLED UTC
+  // (23:30 typed → `…T23:30:00Z`) and `dateEnd` / `origDateEnd` are UTC-midnight
+  // calendar days — all three print their UTC date part via the UTC-pinned
+  // `formatWallClockDate` (browser-local would show a 23:30 return as the next
+  // day in Warsaw). `planned` is a `YYYY-MM-DD` date and keeps `formatDateFull`.
   return (
     <section className="space-y-2 rounded-md border border-border bg-input/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1357,14 +1366,14 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
             title={
               recalcState === 'applied'
                 ? tRecalc('appliedTooltip', {
-                    origDateEnd: formatDateFull(
+                    origDateEnd: formatWallClockDate(
                       claim.origDateEnd ?? claim.dateEnd,
                     ),
-                    actualReturnAt: formatDateFull(actual),
+                    actualReturnAt: formatWallClockDate(actual),
                   })
                 : tRecalc('skippedTooltip', {
-                    actualReturnAt: formatDateFull(actual),
-                    dateEnd: formatDateFull(claim.dateEnd),
+                    actualReturnAt: formatWallClockDate(actual),
+                    dateEnd: formatWallClockDate(claim.dateEnd),
                   })
             }
           />
@@ -1388,7 +1397,7 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
           <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
             {t('actual')}
           </dt>
-          <dd className="text-text tabular-nums">{formatDateFull(actual)}</dd>
+          <dd className="text-text tabular-nums">{formatWallClockDate(actual)}</dd>
         </div>
       </dl>
     </section>
@@ -1473,6 +1482,12 @@ function FactPairs({
     timeTo: hhMmFromIso(claim.delegationActualReturnAt),
     mileage: claim.verifierMileage ?? undefined,
   };
+  // Date display convention for rows 1–2 below (docs/19 #16): the weryfikator
+  // dates are wall-clock LABELLED UTC (their `HH:mm` is sliced off the same
+  // ISO by `hhMmFromIso`), and the declared / verified dates are UTC-midnight
+  // calendar days (the edit input is seeded with `.slice(0, 10)`). All print
+  // their UTC date part via the UTC-pinned `formatWallClockDate`, so a 23:30
+  // return never shows as the next day next to its own 23:30 time.
   const showWeryfikatorColumn = Object.values(weryfikator).some(
     (v) => v !== undefined,
   );
@@ -1545,12 +1560,14 @@ function FactPairs({
             label={tUnified('dateStart')}
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
-            declaredText={formatDateFull(declared.dateStart)}
+            declaredText={formatWallClockDate(declared.dateStart)}
             weryfikatorText={
-              weryfikator.dateStart ? formatDateFull(weryfikator.dateStart) : undefined
+              weryfikator.dateStart
+                ? formatWallClockDate(weryfikator.dateStart)
+                : undefined
             }
             weryfikatorCaption={tUnified('weryfikatorCaption')}
-            verifierDisplay={formatDateFull(claim.dateStart)}
+            verifierDisplay={formatWallClockDate(claim.dateStart)}
             input={(() => {
               // Merge RHF's `ref` with `firstInputRef` so enter-edit focus
               // lands here without overwriting register's own ref.
@@ -1575,12 +1592,14 @@ function FactPairs({
             label={tUnified('dateEnd')}
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
-            declaredText={formatDateFull(declared.dateEnd)}
+            declaredText={formatWallClockDate(declared.dateEnd)}
             weryfikatorText={
-              weryfikator.dateEnd ? formatDateFull(weryfikator.dateEnd) : undefined
+              weryfikator.dateEnd
+                ? formatWallClockDate(weryfikator.dateEnd)
+                : undefined
             }
             weryfikatorCaption={tUnified('weryfikatorCaption')}
-            verifierDisplay={formatDateFull(claim.dateEnd)}
+            verifierDisplay={formatWallClockDate(claim.dateEnd)}
             input={
               <Input
                 type="date"

@@ -16,6 +16,11 @@ import { ACTIVE_DELEGATION_STATUSES } from '../guarantee-watchdog/guarantee-watc
  *    w_trasie, non-soft-deleted) exists → the vehicle is `aktywna`.
  *  - `lastReturnAt` — `max(actualReturnAt)` over its zjechał, non-deleted
  *    delegations → the idle-clock anchor (`null` when it never returned).
+ *    NOT a true instant: `actualReturnAt` is a Warsaw wall-clock LABELLED UTC
+ *    (docs/19 #16) whose calendar date is its raw UTC date part — shared
+ *    `computeVehicleLifecycleStatus` reduces it with `startOfWallClockDayUtc`,
+ *    not the Warsaw `startOfBusinessDayUtc` it applies to `createdAt`
+ *    (UWAGI #26).
  */
 export interface VehicleDelegationStatus {
   hasActiveDelegation: boolean;
@@ -98,6 +103,10 @@ export class VehicleDelegationStatusRepository {
    * — one grouped query for the whole id set (same shape as the watchdog's
    * `_latestZjechalReturnByVehicle`). Vehicles that never returned are simply
    * absent from the result map.
+   *
+   * Values are returned RAW: a Warsaw wall-clock labelled UTC (docs/19 #16)
+   * whose calendar date is its raw date part. Do not reduce them here — shared
+   * `computeVehicleLifecycleStatus` does it with `startOfWallClockDayUtc`.
    */
   private async _latestZjechalReturnByVehicle(
     vehicleIds: string[],

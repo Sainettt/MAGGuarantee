@@ -54,7 +54,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatWallClockDate } from '@/lib/format/numbers';
 import { useDrivers } from '@/lib/hooks/useDrivers';
 import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { useTrailers } from '@/lib/hooks/useTrailers';
@@ -290,8 +290,10 @@ export function CarrierFleetPanel() {
       {
         id: 'lastDroveAt',
         header: tVehCols('lastDroveAt'),
+        // `lastDroveAt` is a copied wall-clock-labelled-UTC `actualReturnAt` or a
+        // UTC-midnight km day — UTC-pinned date helper (docs/19 #16).
         cell: (row) => (
-          <span className="tabular-nums">{formatDateFull(row.lastDroveAt)}</span>
+          <span className="tabular-nums">{formatWallClockDate(row.lastDroveAt)}</span>
         ),
       },
       {
