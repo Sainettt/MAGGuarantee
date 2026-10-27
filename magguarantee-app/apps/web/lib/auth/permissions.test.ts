@@ -29,6 +29,7 @@ function user(patch: Partial<UserDto>): UserDto {
     mustChangePassword: false,
     lider: false,
     permissions: [],
+    carrierId: null,
     ...patch,
   };
 }

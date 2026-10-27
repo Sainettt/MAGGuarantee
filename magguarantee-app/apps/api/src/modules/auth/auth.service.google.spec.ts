@@ -59,6 +59,9 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: now,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: now,
     updatedAt: now,

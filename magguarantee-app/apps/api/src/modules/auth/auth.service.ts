@@ -228,7 +228,7 @@ export class AuthService {
 
     const tokens = await this.issuePair(user, ctx);
     this.logger.log({ msg: 'password login', userId: user.id, role: user.role });
-    return { user: this.toUserDto(user), tokens };
+    return { user: await this.toUserDto(user), tokens };
   }
 
   // ── Google SSO (docs/24 трек A) ──────────────────────
@@ -409,7 +409,7 @@ export class AuthService {
     await this.users.updateLastLogin(user.id, new Date());
     const tokens = await this.issuePair(user, ctx);
     this.logger.log({ msg: 'google login', userId: user.id, role: user.role, via });
-    return { user: this.toUserDto(user), tokens };
+    return { user: await this.toUserDto(user), tokens };
   }
 
   // ── Resend ───────────────────────────────────────────
@@ -570,7 +570,7 @@ export class AuthService {
       msg: 'password changed; other sessions revoked',
       userId: user.id,
     });
-    return { user: this.toUserDto(effective), tokens };
+    return { user: await this.toUserDto(effective), tokens };
   }
 
   // ── Refresh ──────────────────────────────────────────
@@ -672,7 +672,7 @@ export class AuthService {
       }
       throw err;
     }
-    return { user: this.toUserDto(user), tokens };
+    return { user: await this.toUserDto(user), tokens };
   }
 
   /**
@@ -696,7 +696,7 @@ export class AuthService {
     const user = await this.users.findById(userId);
     if (!user || !user.active || user.deletedAt || !user.email) return null;
     return {
-      user: this.toUserDto(user),
+      user: await this.toUserDto(user),
       tokens: { accessToken: await this.signAccessToken(user) },
     };
   }
@@ -754,9 +754,10 @@ export class AuthService {
    * The `user` of every session-issuing response (verify-code, google,
    * refresh, change-password). The web seeds its `/auth/me` cache from it, so
    * it must match `GET /auth/me` field for field — `permissions` included
-   * (docs/25 B4), computed by the same helper the access strategy uses.
+   * (docs/25 B4; with the B6 overrides), computed by the same helper the
+   * access strategy uses, and `carrierId` resolved by {@link ownCarrierId}.
    */
-  toUserDto(user: UserRow): UserDto {
+  async toUserDto(user: UserRow): Promise<UserDto> {
     return {
       id: user.id,
       login: user.login,
@@ -766,7 +767,20 @@ export class AuthService {
       mustChangePassword: user.mustChangePassword,
       lider: user.lider,
       permissions: toPermissionList(effectivePermissions(user)),
+      carrierId: await this.ownCarrierId(user.id, user.role),
     };
+  }
+
+  /**
+   * `UserDto.carrierId` (docs/25 §3 B6, decision Q2): the user's own live
+   * `Carrier.id` for a `przewoznik`, `null` for every other role WITHOUT a
+   * query. One indexed lookup (`Carrier.userId` is UNIQUE), run only where a
+   * `UserDto` is built — never in `JwtAccessStrategy`, so ordinary requests
+   * pay nothing (see `UsersRepository.findOwnCarrierId`).
+   */
+  async ownCarrierId(userId: string, role: Role): Promise<string | null> {
+    if (role !== 'przewoznik') return null;
+    return this.users.findOwnCarrierId(userId);
   }
 
   // ── Internals ────────────────────────────────────────

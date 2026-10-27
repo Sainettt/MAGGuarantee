@@ -57,6 +57,9 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: now,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: now,
     updatedAt: now,
@@ -911,5 +914,170 @@ describe('DirectoryService.grantAccess', () => {
     h.users.createFromDirectory.mockRejectedValue(boom);
 
     await expect(grant(h)).rejects.toBe(boom);
+  });
+});
+
+// ── docs/25 §3 B6 — per-user permission overrides ─────────────
+//
+// The directory never SETS `extraPermissions` / `deniedPermissions` (MAGSpace
+// knows nothing about them) and never seeds them on a new row; when the pair
+// it writes changes, it prunes what no longer fits — same UPDATE — and writes
+// `system.pruneUserPermissions` (decision Q3).
+describe('DirectoryService — permission overrides (docs/25 B6)', () => {
+  const OVERRIDE_KEYS = { extraPermissions: expect.anything() };
+  const DENIED_KEYS = { deniedPermissions: expect.anything() };
+
+  it('JIT provisioning never seeds the lists', async () => {
+    const h = makeHarness();
+
+    await h.svc.provisionOrSync({
+      existing: null,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: true,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(expect.not.objectContaining(OVERRIDE_KEYS));
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(expect.not.objectContaining(DENIED_KEYS));
+  });
+
+  it('sign-in with an unchanged pair leaves the stored lists alone — even inert entries', async () => {
+    const h = makeHarness();
+    const existing = makeUser({ role: 'planista', deniedPermissions: ['gone.permission'] });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith('u-1', expect.not.objectContaining(DENIED_KEYS));
+    expect(h.users.update).toHaveBeenCalledWith('u-1', expect.not.objectContaining(OVERRIDE_KEYS));
+    expect(h.audit.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'system.pruneUserPermissions' }),
+    );
+  });
+
+  it('sign-in with a new mapped role prunes in the same UPDATE and audits it as a system action', async () => {
+    const h = makeHarness();
+    const existing = makeUser({
+      role: 'opiekun',
+      deniedPermissions: ['carrier_documents.delete', 'vehicles.read'],
+    });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(
+      'u-1',
+      expect.objectContaining({
+        role: 'planista',
+        extraPermissions: [],
+        deniedPermissions: ['vehicles.read'],
+      }),
+    );
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'system.pruneUserPermissions',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      before: {
+        role: 'opiekun',
+        lider: false,
+        extraPermissions: [],
+        deniedPermissions: ['carrier_documents.delete', 'vehicles.read'],
+      },
+      after: { role: 'planista', lider: false, extraPermissions: [], deniedPermissions: ['vehicles.read'] },
+      metadata: { trigger: 'signIn', removed: { extra: [], denied: ['carrier_documents.delete'] } },
+      actor: 'system',
+    });
+  });
+
+  it('a demotion from leader in MAGSpace prunes the denied leader right', async () => {
+    const h = makeHarness();
+    const existing = makeUser({
+      role: 'planista',
+      lider: true,
+      deniedPermissions: ['vehicles.planner_transfer.decide'],
+    });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith(
+      'u-1',
+      expect.objectContaining({ lider: false, deniedPermissions: [] }),
+    );
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'system.pruneUserPermissions' }),
+    );
+  });
+
+  it('a role change with nothing left to prune writes neither the lists nor a prune row', async () => {
+    const h = makeHarness();
+    const existing = makeUser({ role: 'dyspozytor', deniedPermissions: ['vehicles.read'] });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith('u-1', expect.not.objectContaining(DENIED_KEYS));
+    expect(h.audit.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'system.pruneUserPermissions' }),
+    );
+  });
+
+  it('grantAccess: a new account starts without overrides', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(
+      makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } }),
+    );
+
+    await h.svc.grantAccess('jan.kowalski@magtrans.eu', 'weryfikator');
+
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(expect.not.objectContaining(OVERRIDE_KEYS));
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(expect.not.objectContaining(DENIED_KEYS));
+  });
+
+  it('grantAccess: a re-grant prunes in the same UPDATE and writes the system row', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(
+      makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } }),
+    );
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ role: 'weryfikator', deniedPermissions: ['km.verify', 'km.read'] }),
+    );
+
+    await h.svc.grantAccess('jan.kowalski@magtrans.eu', 'eksport');
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(
+      'u-1',
+      expect.objectContaining({ role: 'eksport', extraPermissions: [], deniedPermissions: ['km.read'] }),
+    );
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'system.pruneUserPermissions',
+        actor: 'system',
+        metadata: { trigger: 'grantAccess', removed: { extra: [], denied: ['km.verify'] } },
+      }),
+    );
   });
 });

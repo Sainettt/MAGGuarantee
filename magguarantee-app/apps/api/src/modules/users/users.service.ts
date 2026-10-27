@@ -9,10 +9,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import {
+  USER_CARRIER_ROLE_LOCKED,
+  USER_CARRIER_ROLE_LOCKED_MESSAGE,
   USER_LIDER_ID_INVALID,
   USER_LIDER_ID_INVALID_MESSAGE,
   USER_MANAGED_BY_MAGSPACE,
   type CreateUserDto,
+  type Permission,
   type ResetPasswordModeDto,
   type UpdateUserDto,
   type UserDtoFull,
@@ -22,6 +25,7 @@ import {
 
 import type { Env } from '../../config/env.schema';
 import { AuditContext } from '../../common/audit';
+import { storedOverrideList } from '../../common/authz/effective-permissions';
 import { PasswordService } from '../auth/password.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import { MailService } from '../mail/mail.service';
@@ -31,6 +35,7 @@ import {
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
 import { assertLiderPair } from './lider-pair';
+import { assertOverridesFit, overridePruneFor } from './permission-overrides';
 import {
   UsersRepository,
   type UserLiderMiniRow,
@@ -208,6 +213,7 @@ export class UsersService {
         'Nie można zmienić roli na przewoźnika tym endpointem',
       );
     }
+    this._assertCarrierRoleKept(existing, dto);
     // Hand-back: once the account is `local`, `role` is owned here and nothing
     // consults `roleOverride` any more. Leaving it set would be a trap — it
     // silently wins again the day someone flips the account back to
@@ -219,6 +225,7 @@ export class UsersService {
     const roleOverride = handingBack ? null : dto.roleOverride;
     this._assertDirectoryOwnedFields(existing, dto, roleOverride);
     this._assertLiderPairs(existing, dto, roleOverride);
+    const overrides = this._resolveOverrides(existing, dto);
     const liderId = await this._resolveLiderId(existing, dto, roleOverride);
     // Full pre-image; the interceptor trims it to the response's key-set, so
     // a leadership change lands in the `updateUser` row as before → after.
@@ -239,6 +246,9 @@ export class UsersService {
         // Clearing the override hands the role decision back to the stanowisko
         // mapping; the change takes effect on the next sign-in or reconcile.
         ...(roleOverride !== undefined ? { roleOverride } : {}),
+        // docs/25 B6 — the lists in the body, or the stored ones pruned by a
+        // `(role, lider)` change; same UPDATE as the pair they are judged on.
+        ...overrides,
       });
       return this.toDtoResolved(updated);
     } catch (err) {
@@ -261,9 +271,11 @@ export class UsersService {
    * Deliberately allowed on a managed account: `managedBy` itself (that IS the
    * way out), `roleOverride`, `lider` next to a `roleOverride` (stored, or set
    * in this body — the sync then keeps the stored flag), the cosmetic
-   * `name` / `email` fields, which the next sync overwrites, and `liderId` —
+   * `name` / `email` fields, which the next sync overwrites, `liderId` —
    * MAGSpace has no hierarchy, the directory never touches it, so only an
-   * admin sets it (docs/29 U9).
+   * admin sets it (docs/29 U9) — and `extraPermissions` / `deniedPermissions`
+   * (docs/25 §3 B6): the directory never sets them either, it only prunes the
+   * entries a role / leader change it applies no longer admits.
    *
    * `roleOverride` is the value this UPDATE will write (`undefined` = keep).
    */
@@ -314,6 +326,64 @@ export class UsersService {
     assertLiderPair(dto.role ?? existing.role, lider, 'role');
     const finalOverride = roleOverride !== undefined ? roleOverride : existing.roleOverride;
     if (finalOverride !== null) assertLiderPair(finalOverride, lider, 'roleOverride');
+  }
+
+  /**
+   * Decision Q5 (2026-10-27, bug fix): a carrier account keeps its role. It is
+   * bound to its Carrier row (fleet, wnioski, ownership guards key on
+   * `Carrier.userId`), so turning it into an employee here would leave a
+   * carrier company whose login suddenly acts as staff. Until B6 only the
+   * opposite direction ("to przewoznik", just above) was refused, and the
+   * admin form sent `role: 'pracownik'` for carriers, silently converting them
+   * on save. `UpdateUserSchema.role` cannot carry `przewoznik`, so ANY role in
+   * the body of a przewoznik row differs from the stored one.
+   */
+  private _assertCarrierRoleKept(existing: UserRow, dto: UpdateUserDto): void {
+    if (existing.role !== 'przewoznik' || dto.role === undefined) return;
+    throw new UnprocessableEntityException({
+      message: USER_CARRIER_ROLE_LOCKED_MESSAGE,
+      extensions: { code: USER_CARRIER_ROLE_LOCKED },
+    });
+  }
+
+  /**
+   * The override columns this PATCH writes (docs/25 §3 B6), judged on the
+   * MERGED row — the final `role` (`dto.role ?? stored`) and `lider`:
+   *  - a list in the body must fit it, else 422 (`assertOverridesFit`:
+   *    `USER_PERMISSION_NOT_GRANTABLE` / `USER_PERMISSION_NOT_REVOCABLE` /
+   *    `USER_ADMIN_CANNOT_BE_DENIED`), and is written in catalog order;
+   *  - a stored list NOT in the body is pruned when `(role, lider)` changes
+   *    (`overridePruneFor`), otherwise left alone.
+   * Judged against `role`, not `roleOverride`: `role` is what the permissions
+   * are computed from today; a pending override reaches `role` at the next
+   * sign-in, and that sync prunes again.
+   * Recorded by the `updateUser` row — `UserDtoFull` carries both lists, so
+   * a prune shows up in its before → after.
+   */
+  private _resolveOverrides(
+    existing: UserRow,
+    dto: UpdateUserDto,
+  ): Partial<{ extraPermissions: Permission[]; deniedPermissions: Permission[] }> {
+    const next = { role: dto.role ?? existing.role, lider: dto.lider ?? existing.lider };
+    assertOverridesFit(next, { extra: dto.extraPermissions, denied: dto.deniedPermissions });
+    const sent = {
+      ...(dto.extraPermissions !== undefined
+        ? { extraPermissions: storedOverrideList(dto.extraPermissions) }
+        : {}),
+      ...(dto.deniedPermissions !== undefined
+        ? { deniedPermissions: storedOverrideList(dto.deniedPermissions) }
+        : {}),
+    };
+    const prune = overridePruneFor({ ...existing, ...sent }, next);
+    if (!prune) return sent;
+    this.logger.log({
+      msg: 'permission overrides pruned by a role / leader change',
+      userId: existing.id,
+      role: next.role,
+      lider: next.lider,
+      removed: prune.removed,
+    });
+    return { ...sent, ...prune.data };
   }
 
   /**
@@ -509,6 +579,9 @@ export class UsersService {
       directorySyncedAt: row.directorySyncedAt
         ? row.directorySyncedAt.toISOString()
         : null,
+      // docs/25 B6 — what is stored, minus ids that left the catalog.
+      extraPermissions: storedOverrideList(row.extraPermissions),
+      deniedPermissions: storedOverrideList(row.deniedPermissions),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -522,6 +595,11 @@ export class UsersService {
 
   findById(id: string): Promise<UserRow | null> {
     return this.repo.findById(id);
+  }
+
+  /** `UserDto.carrierId` — the user's live Carrier row (docs/25 B6, Q2). */
+  findOwnCarrierId(userId: string): Promise<string | null> {
+    return this.repo.findOwnCarrierId(userId);
   }
 
   /** Google SSO: first link matches on e-mail (docs/24 decision #10). */

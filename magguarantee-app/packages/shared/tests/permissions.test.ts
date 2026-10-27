@@ -5,7 +5,8 @@
 // permission fixture against the frozen roles fixture). Here: the catalog's
 // own invariants, the decided assignments that no route pins (service
 // capabilities, 2026-10-22/23 decisions) and that docs/03 shows exactly what
-// the code grants.
+// the code grants. B6: the per-user overrides (`GRANTABLE_EXTRA`,
+// `DEPENDENT_PERMISSIONS`, `effectivePermissionsFor`, `pruneOverrides`).
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -14,13 +15,20 @@ import { describe, expect, it } from 'vitest';
 
 import * as shared from '../src';
 import {
+  DEPENDENT_PERMISSIONS,
+  GRANTABLE_EXTRA,
   LIDER_PERMISSIONS,
   PERMISSIONS,
   ROLE_PERMISSIONS,
+  effectivePermissionsFor,
+  grantableExtraFor,
   hasAnyPermission,
   hasPermission,
   isPermission,
+  permissionsDependingOn,
   permissionsFor,
+  pruneOverrides,
+  revocablePermissionsFor,
   rolesSatisfying,
   type Permission,
 } from '../src/permissions';
@@ -200,11 +208,288 @@ describe('decided assignments without a route of their own', () => {
   });
 });
 
+// ─── Per-user overrides (docs/25 §3 B6) ────────────────────
+
+const DOCS_READ: Permission = 'carrier_documents.read';
+const DOCS_ADD: Permission = 'carrier_documents.add';
+const DOCS_DELETE: Permission = 'carrier_documents.delete';
+
+describe('GRANTABLE_EXTRA (B6)', () => {
+  it('is the decided first case: przewoznik → carrier_documents.read / .add', () => {
+    expect(GRANTABLE_EXTRA).toEqual({ przewoznik: [DOCS_READ, DOCS_ADD] });
+  });
+
+  it('carrier_documents.delete is never grantable to przewoznik', () => {
+    expect(grantableExtraFor('przewoznik')).not.toContain(DOCS_DELETE);
+  });
+
+  it('keys are roles; entries are catalog strings, each at most once', () => {
+    for (const [role, list] of Object.entries(GRANTABLE_EXTRA)) {
+      expect((ROLES as readonly string[]).includes(role)).toBe(true);
+      expect((list ?? []).filter((p) => !isPermission(p))).toEqual([]);
+      expect(new Set(list).size).toBe((list ?? []).length);
+    }
+  });
+
+  it.each(ROLES)('%s: no grantable right is already held by role (leader included)', (role) => {
+    const held = new Set(permissionsFor(role, true));
+    expect(grantableExtraFor(role).filter((p) => held.has(p))).toEqual([]);
+  });
+
+  it('grantableExtraFor: catalog order; nothing for a role without an entry or a non-role', () => {
+    expect(grantableExtraFor('przewoznik')).toEqual([DOCS_READ, DOCS_ADD]);
+    for (const role of ROLES.filter((r) => r !== 'przewoznik')) {
+      expect(grantableExtraFor(role)).toEqual([]);
+    }
+    for (const bogus of ['__proto__', 'constructor', 'toString', '']) {
+      expect(grantableExtraFor(bogus as Role)).toEqual([]);
+    }
+  });
+});
+
+describe('revocablePermissionsFor (B6)', () => {
+  it('admin can never be denied anything (decision Q4)', () => {
+    expect(revocablePermissionsFor('admin', false)).toEqual([]);
+    expect(revocablePermissionsFor('admin', true)).toEqual([]);
+  });
+
+  it.each(ROLES.filter((r) => r !== 'admin'))('%s: the base set, leader flag included', (role) => {
+    expect(revocablePermissionsFor(role, false)).toEqual(permissionsFor(role, false));
+    expect(revocablePermissionsFor(role, true)).toEqual(permissionsFor(role, true));
+  });
+});
+
+describe('DEPENDENT_PERMISSIONS (B6)', () => {
+  const entries = Object.entries(DEPENDENT_PERMISSIONS) as Array<[Permission, readonly Permission[]]>;
+
+  it('holds only catalog strings, no self-dependency, no duplicate', () => {
+    for (const [right, needs] of entries) {
+      expect(isPermission(right)).toBe(true);
+      expect(needs.filter((p) => !isPermission(p))).toEqual([]);
+      expect(needs).not.toContain(right);
+      expect(new Set(needs).size).toBe(needs.length);
+    }
+  });
+
+  it('is acyclic', () => {
+    const state = new Map<Permission, 'visiting' | 'done'>();
+    const cycles: string[] = [];
+    const visit = (p: Permission, path: Permission[]): void => {
+      if (state.get(p) === 'done') return;
+      if (state.get(p) === 'visiting') {
+        cycles.push([...path, p].join(' → '));
+        return;
+      }
+      state.set(p, 'visiting');
+      for (const next of DEPENDENT_PERMISSIONS[p] ?? []) visit(next, [...path, p]);
+      state.set(p, 'done');
+    };
+    for (const p of PERMISSIONS) visit(p, []);
+    expect(cycles).toEqual([]);
+  });
+
+  it('pins the decided edges', () => {
+    expect(DEPENDENT_PERMISSIONS['claims.verify']).toEqual(['claims.read']);
+    expect(DEPENDENT_PERMISSIONS['claims.verify_pending_authorization']).toEqual(['claims.verify']);
+    expect(DEPENDENT_PERMISSIONS['claims.submit']).toEqual(['claims.read']);
+    expect(DEPENDENT_PERMISSIONS[DOCS_ADD]).toEqual([DOCS_READ]);
+    expect(DEPENDENT_PERMISSIONS[DOCS_DELETE]).toEqual([DOCS_READ]);
+    expect(DEPENDENT_PERMISSIONS['km.verify']).toEqual(['km.read']);
+    expect(DEPENDENT_PERMISSIONS['gps.refresh']).toEqual(['gps.read']);
+    expect(entries).toHaveLength(16);
+  });
+
+  it('permissionsDependingOn follows chains, in catalog order', () => {
+    expect(permissionsDependingOn('claims.read')).toEqual([
+      'claims.submit',
+      'claims.verify',
+      'claims.verify_pending_authorization',
+    ]);
+    expect(permissionsDependingOn(DOCS_READ)).toEqual([DOCS_ADD, DOCS_DELETE]);
+    expect(permissionsDependingOn('vehicles.read')).toEqual([
+      'vehicles.rates.read',
+      'vehicles.fuel_card.read',
+      'vehicles.planner_transfer.request',
+      'vehicles.planner_transfer.decide',
+      'vehicles.planner_history.read',
+    ]);
+    expect(permissionsDependingOn('delegations.read')).toEqual([
+      'delegations.create',
+      'delegations.cancel',
+      'delegations.mark_ready',
+      'delegations.transit',
+    ]);
+    expect(permissionsDependingOn('users.manage')).toEqual([]);
+  });
+});
+
+describe('effectivePermissionsFor (B6)', () => {
+  it.each(ROLES.flatMap((role) => [[role, false] as const, [role, true] as const]))(
+    '%s (lider=%s) without overrides = permissionsFor(role, lider)',
+    (role, lider) => {
+      expect(effectivePermissionsFor(role, lider, [], [])).toEqual(permissionsFor(role, lider));
+    },
+  );
+
+  it('a przewoznik granted read/add holds them on top of his role, in catalog order', () => {
+    const got = effectivePermissionsFor('przewoznik', false, [DOCS_ADD, DOCS_READ], []);
+    const expected = new Set<Permission>([...permissionsFor('przewoznik'), DOCS_READ, DOCS_ADD]);
+    expect(got).toEqual(PERMISSIONS.filter((p) => expected.has(p)));
+    expect(got).not.toContain(DOCS_DELETE);
+  });
+
+  it('a denial removes a base right', () => {
+    const got = effectivePermissionsFor('opiekun', false, [], [DOCS_DELETE]);
+    expect(got).toEqual(permissionsFor('opiekun').filter((p) => p !== DOCS_DELETE));
+  });
+
+  it('denied wins — even over an extra on a row that missed a prune', () => {
+    expect(effectivePermissionsFor('przewoznik', false, [DOCS_READ], [DOCS_READ])).not.toContain(DOCS_READ);
+  });
+
+  it('extra side is filtered: a right outside GRANTABLE_EXTRA[role] never widens access', () => {
+    expect(effectivePermissionsFor('przewoznik', false, [DOCS_DELETE, 'users.manage'], [])).toEqual(
+      permissionsFor('przewoznik'),
+    );
+    expect(effectivePermissionsFor('planista', false, ['claims.verify', DOCS_READ], [])).toEqual(
+      permissionsFor('planista'),
+    );
+    expect(effectivePermissionsFor('admin', false, ['claims.submit', 'panel.carrier'], [])).toEqual(
+      permissionsFor('admin'),
+    );
+  });
+
+  it('denied side is filtered: a denial outside the base set has nothing to remove', () => {
+    expect(effectivePermissionsFor('planista', false, [], ['users.manage', DOCS_READ])).toEqual(
+      permissionsFor('planista'),
+    );
+  });
+
+  it('strings outside the catalog are inert on both sides', () => {
+    expect(
+      effectivePermissionsFor('przewoznik', false, ['carriers.attachments.read', ''], ['claims', 'KM.READ']),
+    ).toEqual(permissionsFor('przewoznik'));
+  });
+
+  it('duplicates and input order do not matter', () => {
+    expect(effectivePermissionsFor('przewoznik', false, [DOCS_ADD, DOCS_READ, DOCS_ADD], [])).toEqual(
+      effectivePermissionsFor('przewoznik', false, [DOCS_READ, DOCS_ADD], []),
+    );
+  });
+
+  it('the leader flag still applies under overrides', () => {
+    const got = effectivePermissionsFor('planista', true, [], ['vehicles.planner_transfer.request']);
+    expect(got).toContain('vehicles.planner_transfer.decide');
+    expect(got).not.toContain('vehicles.planner_transfer.request');
+  });
+
+  it('fails closed for a non-role, extras included', () => {
+    expect(effectivePermissionsFor('superadmin' as Role, true, [...PERMISSIONS], [])).toEqual([]);
+  });
+
+  it('returns a fresh array — mutating it cannot corrupt the permissionsFor cache', () => {
+    const cached = [...permissionsFor('opiekun')];
+    const got = effectivePermissionsFor('opiekun', false, [], []);
+    got.length = 0;
+    expect(permissionsFor('opiekun')).toEqual(cached);
+  });
+});
+
+describe('pruneOverrides (B6)', () => {
+  it('keeps what still fits, deduplicated, in catalog order — nothing removed', () => {
+    expect(pruneOverrides('przewoznik', false, [DOCS_ADD, DOCS_READ, DOCS_ADD], ['delegations.cancel'])).toEqual({
+      extra: [DOCS_READ, DOCS_ADD],
+      denied: ['delegations.cancel'],
+      removed: { extra: [], denied: [] },
+    });
+  });
+
+  it('role change: denials the new role does not have are dropped', () => {
+    expect(pruneOverrides('planista', false, [], [DOCS_DELETE, 'vehicles.read'])).toEqual({
+      extra: [],
+      denied: ['vehicles.read'],
+      removed: { extra: [], denied: [DOCS_DELETE] },
+    });
+  });
+
+  it('leader loss: a denied leader right is dropped with the flag', () => {
+    const decide: Permission = 'vehicles.planner_transfer.decide';
+    expect(pruneOverrides('planista', true, [], [decide]).removed.denied).toEqual([]);
+    expect(pruneOverrides('planista', false, [], [decide])).toEqual({
+      extra: [],
+      denied: [],
+      removed: { extra: [], denied: [decide] },
+    });
+  });
+
+  it('admin: every denial is dropped (decision Q4)', () => {
+    expect(pruneOverrides('admin', false, [], ['users.manage', 'claims.read'])).toEqual({
+      extra: [],
+      denied: [],
+      removed: { extra: [], denied: ['users.manage', 'claims.read'] },
+    });
+  });
+
+  it('extras the role may not be granted are dropped', () => {
+    expect(pruneOverrides('pracownik', false, [DOCS_READ], [])).toEqual({
+      extra: [],
+      denied: [],
+      removed: { extra: [DOCS_READ], denied: [] },
+    });
+  });
+
+  it('an extra that is also denied is dropped (it never took effect), and so is the denial', () => {
+    expect(pruneOverrides('przewoznik', false, [DOCS_READ, DOCS_ADD], [DOCS_READ])).toEqual({
+      extra: [DOCS_ADD],
+      denied: [],
+      removed: { extra: [DOCS_READ], denied: [DOCS_READ] },
+    });
+  });
+
+  it('unknown strings are dropped and reported once each, in input order', () => {
+    expect(pruneOverrides('przewoznik', false, ['x.y', DOCS_READ, 'x.y'], ['zz', 'claims.read', 'zz'])).toEqual({
+      extra: [DOCS_READ],
+      denied: ['claims.read'],
+      removed: { extra: ['x.y'], denied: ['zz'] },
+    });
+  });
+
+  it('never changes what a non-admin row grants; on admin it only drops denials', () => {
+    const samples: Array<[string[], string[]]> = [
+      [[], []],
+      [[DOCS_READ, DOCS_ADD], []],
+      [[DOCS_READ, DOCS_DELETE, 'junk'], [DOCS_READ, 'claims.read']],
+      [['users.manage'], ['vehicles.read', 'km.read', DOCS_DELETE]],
+      [[...PERMISSIONS], [...PERMISSIONS].slice(0, 12)],
+      [[DOCS_ADD], ['vehicles.planner_transfer.decide', 'panel.planista']],
+    ];
+    for (const role of ROLES) {
+      for (const lider of [false, true]) {
+        for (const [extra, denied] of samples) {
+          const pruned = pruneOverrides(role, lider, extra, denied);
+          const before = effectivePermissionsFor(role, lider, extra, denied);
+          const after = effectivePermissionsFor(role, lider, pruned.extra, pruned.denied);
+          if (role === 'admin') {
+            expect(after).toEqual(permissionsFor('admin', lider));
+          } else {
+            expect({ role, lider, extra, denied, after }).toEqual({ role, lider, extra, denied, after: before });
+          }
+        }
+      }
+    }
+  });
+});
+
 describe('packaging', () => {
   it('the barrel exports the catalog but not the docs matrix', () => {
     expect(shared.PERMISSIONS).toBe(PERMISSIONS);
     expect(typeof shared.permissionsFor).toBe('function');
     expect(typeof shared.rolesSatisfying).toBe('function');
+    // B6
+    expect(shared.GRANTABLE_EXTRA).toBe(GRANTABLE_EXTRA);
+    expect(shared.DEPENDENT_PERMISSIONS).toBe(DEPENDENT_PERMISSIONS);
+    expect(typeof shared.effectivePermissionsFor).toBe('function');
+    expect(typeof shared.pruneOverrides).toBe('function');
     expect('renderPermissionMatrix' in shared).toBe(false);
     expect('PERMISSION_DESCRIPTIONS' in shared).toBe(false);
   });

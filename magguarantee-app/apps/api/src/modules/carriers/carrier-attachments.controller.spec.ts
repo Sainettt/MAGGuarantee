@@ -6,11 +6,17 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 
 import { rolesSatisfying, type Permission, type Role } from '@magguarantee/shared';
 
+import {
+  CARRIER_OWNERSHIP_KEY,
+  OPIEKUN_OWNERSHIP_KEY,
+} from '../../common/guards/ownership.constants';
+import { CarrierOwnershipGuard, OpiekunOwnershipGuard } from '../../common/guards';
 import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -21,12 +27,14 @@ import type { CarrierAttachmentsService } from './carrier-attachments.service';
 /**
  * Authorization unit tests for `CarrierAttachmentsController`.
  *
- * Mirrors the carrier CRUD access matrix (docs/03-roles.md): admin /
- * opiekun(own) only. `przewoznik` and `pracownik` never reach these
- * standalone document endpoints. Opiekun ownership is enforced upstream by
- * `OpiekunOwnershipGuard` (`@OpiekunOwns('id','param','carrierId')`) since
- * the carrier id is a route param on every endpoint — including the
- * multipart upload.
+ * By ROLE (docs/03-roles.md): admin / opiekun(own) only — `przewoznik` and
+ * `pracownik` hold no `carrier_documents.*`. Since docs/25 §3 B6 an admin may
+ * grant `.read` / `.add` to ONE przewoznik (per-user override); that case is
+ * covered over HTTP in `carrier-documents.access.spec.ts`. Ownership is
+ * enforced by `OpiekunOwnershipGuard` and `CarrierOwnershipGuard`
+ * (`@OpiekunOwns` / `@CarrierOwns('id','param','carrierId')`) since the
+ * carrier id is a route param on every endpoint — including the multipart
+ * upload.
  *
  * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
  * `@Roles` — `carrier_documents.read` (list, download), `.add` (upload),
@@ -125,6 +133,19 @@ describe('CarrierAttachmentsController — authorization', () => {
         expect(roles).not.toContain('pracownik');
       },
     );
+  });
+
+  describe('ownership (docs/25 B6 — the guards are the scope)', () => {
+    it('the class runs both ownership guards', () => {
+      const guards = Reflect.getMetadata(GUARDS_METADATA, CarrierAttachmentsController) as unknown[];
+      expect(guards).toEqual(expect.arrayContaining([OpiekunOwnershipGuard, CarrierOwnershipGuard]));
+    });
+
+    it.each(ALL_HANDLERS)('%s checks the carrier :id for both opiekun and przewoznik', (handler) => {
+      const meta = { source: 'param', name: 'id', as: 'carrierId' };
+      expect(reflector.get(OPIEKUN_OWNERSHIP_KEY, handlerOf(handler))).toEqual(meta);
+      expect(reflector.get(CARRIER_OWNERSHIP_KEY, handlerOf(handler))).toEqual(meta);
+    });
   });
 
   describe('PermissionsGuard', () => {

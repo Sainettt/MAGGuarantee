@@ -319,7 +319,10 @@ export class AuthController {
       lider: user.lider ?? false,
       // docs/25 B4 — the set the guards of THIS request use, serialised (not
       // recomputed): whatever PermissionsGuard admitted is what the web sees.
+      // B6 overrides are already in it (JwtAccessStrategy).
       permissions: toPermissionList(user.permissions),
+      // docs/25 B6 (Q2) — przewoznik only; null without a query otherwise.
+      carrierId: await this.auth.ownCarrierId(user.sub, user.role),
     };
   }
 

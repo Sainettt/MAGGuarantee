@@ -34,6 +34,9 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: now,
     updatedAt: now,
@@ -820,6 +823,244 @@ describe('UsersService', () => {
       expect(repo.findLiderMinis).toHaveBeenCalledWith(['u-lead']);
       const p1 = out.items.find((i) => i.id === 'u-p1');
       expect(p1?.liderUser?.id).toBe('u-lead');
+    });
+  });
+
+  // ── docs/25 §3 B6 — per-user permission overrides ──────────
+  describe('permission overrides (docs/25 B6)', () => {
+    const READ = 'carrier_documents.read' as const;
+    const ADD = 'carrier_documents.add' as const;
+    const DELETE = 'carrier_documents.delete' as const;
+    const DECIDE = 'vehicles.planner_transfer.decide' as const;
+
+    const refused = (code: string, permissions: string[]) => ({
+      status: 422,
+      response: { extensions: { code, permissions } },
+    });
+    const carrier = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-car', login: 'przewoznik2', email: 'p2@example.com', role: 'przewoznik', ...over });
+    const opiekun = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-op', login: 'op', email: 'op@magtrans.eu', role: 'opiekun', ...over });
+    const planista = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-pl', login: 'pl', email: 'pl@magtrans.eu', role: 'planista', ...over });
+
+    // ── grant / revoke ──
+
+    it('grants carrier_documents.read/.add to a przewoznik — stored in catalog order', async () => {
+      const { svc, repo } = makeService([carrier()]);
+
+      const out = await svc.update('u-car', { extraPermissions: [ADD, READ] });
+
+      expect(repo.update).toHaveBeenCalledWith('u-car', { extraPermissions: [READ, ADD] });
+      expect(out).toMatchObject({ extraPermissions: [READ, ADD], deniedPermissions: [] });
+    });
+
+    it('[] clears the stored list', async () => {
+      const { svc, repo } = makeService([carrier({ extraPermissions: [READ, ADD] })]);
+
+      await expect(svc.update('u-car', { extraPermissions: [] })).resolves.toMatchObject({
+        extraPermissions: [],
+      });
+      expect(repo.update).toHaveBeenCalledWith('u-car', { extraPermissions: [] });
+    });
+
+    it('revokes a right the role grants', async () => {
+      const { svc, repo } = makeService([opiekun()]);
+
+      await expect(svc.update('u-op', { deniedPermissions: [DELETE] })).resolves.toMatchObject({
+        deniedPermissions: [DELETE],
+      });
+      expect(repo.update).toHaveBeenCalledWith('u-op', { deniedPermissions: [DELETE] });
+    });
+
+    // ── 422s ──
+
+    it('422 USER_PERMISSION_NOT_GRANTABLE: carrier_documents.delete to a przewoznik', async () => {
+      const { svc, repo } = makeService([carrier()]);
+
+      await expect(svc.update('u-car', { extraPermissions: [READ, DELETE] })).rejects.toMatchObject(
+        refused('USER_PERMISSION_NOT_GRANTABLE', [DELETE]),
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('422 USER_PERMISSION_NOT_GRANTABLE: any extra on a role without grantable rights', async () => {
+      const { svc } = makeService([planista()]);
+
+      await expect(svc.update('u-pl', { extraPermissions: ['claims.verify', READ] })).rejects.toMatchObject(
+        refused('USER_PERMISSION_NOT_GRANTABLE', ['claims.verify', READ]),
+      );
+    });
+
+    it('422 USER_PERMISSION_NOT_REVOCABLE: a right the role does not have', async () => {
+      const { svc, repo } = makeService([planista()]);
+
+      await expect(
+        svc.update('u-pl', { deniedPermissions: ['vehicles.read', 'claims.verify'] }),
+      ).rejects.toMatchObject(refused('USER_PERMISSION_NOT_REVOCABLE', ['claims.verify']));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('the leader flag counts: decide is revocable only from a lider planista', async () => {
+      const plain = makeService([planista({ lider: false })]);
+      await expect(plain.svc.update('u-pl', { deniedPermissions: [DECIDE] })).rejects.toMatchObject(
+        refused('USER_PERMISSION_NOT_REVOCABLE', [DECIDE]),
+      );
+
+      const lead = makeService([planista({ lider: true })]);
+      await expect(lead.svc.update('u-pl', { deniedPermissions: [DECIDE] })).resolves.toMatchObject({
+        deniedPermissions: [DECIDE],
+      });
+    });
+
+    it('422 USER_ADMIN_CANNOT_BE_DENIED: no denial on an admin (decision Q4)', async () => {
+      const { svc, repo } = makeService([makeRow({ id: 'u-adm', role: 'admin' })]);
+
+      await expect(svc.update('u-adm', { deniedPermissions: ['users.manage'] })).rejects.toMatchObject(
+        refused('USER_ADMIN_CANNOT_BE_DENIED', ['users.manage']),
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+      // An empty list is not a denial.
+      await expect(svc.update('u-adm', { deniedPermissions: [] })).resolves.toMatchObject({
+        deniedPermissions: [],
+      });
+    });
+
+    it('judged on the MERGED row: the role of the same body, not the stored one', async () => {
+      const toPlanista = makeService([opiekun()]);
+      await expect(
+        toPlanista.svc.update('u-op', { role: 'planista', deniedPermissions: [DELETE] }),
+      ).rejects.toMatchObject(refused('USER_PERMISSION_NOT_REVOCABLE', [DELETE]));
+
+      const toAdmin = makeService([opiekun()]);
+      await expect(
+        toAdmin.svc.update('u-op', { role: 'admin', deniedPermissions: ['vehicles.read'] }),
+      ).rejects.toMatchObject(refused('USER_ADMIN_CANNOT_BE_DENIED', ['vehicles.read']));
+
+      const ok = makeService([opiekun()]);
+      await expect(
+        ok.svc.update('u-op', { role: 'planista', deniedPermissions: ['vehicles.read'] }),
+      ).resolves.toMatchObject({ role: 'planista', deniedPermissions: ['vehicles.read'] });
+    });
+
+    // ── prune on a role / leader change ──
+
+    it('a role change prunes the stored denials the new role does not have', async () => {
+      const { svc, repo } = makeService([opiekun({ deniedPermissions: [DELETE, 'vehicles.read'] })]);
+
+      const out = await svc.update('u-op', { role: 'planista' });
+
+      expect(repo.update).toHaveBeenCalledWith('u-op', {
+        role: 'planista',
+        extraPermissions: [],
+        deniedPermissions: ['vehicles.read'],
+      });
+      expect(out.deniedPermissions).toEqual(['vehicles.read']);
+    });
+
+    it('a role change to admin drops every stored denial', async () => {
+      const { svc } = makeService([opiekun({ deniedPermissions: ['vehicles.read'] })]);
+
+      await expect(svc.update('u-op', { role: 'admin' })).resolves.toMatchObject({
+        role: 'admin',
+        deniedPermissions: [],
+      });
+    });
+
+    it('a leader change prunes a denied leader right', async () => {
+      const { svc, repo } = makeService([planista({ lider: true, deniedPermissions: [DECIDE] })]);
+
+      await expect(svc.update('u-pl', { lider: false })).resolves.toMatchObject({
+        lider: false,
+        deniedPermissions: [],
+      });
+      expect(repo.update).toHaveBeenCalledWith('u-pl', {
+        lider: false,
+        extraPermissions: [],
+        deniedPermissions: [],
+      });
+    });
+
+    it('nothing to prune → the UPDATE is exactly what it was before B6', async () => {
+      const { svc, repo } = makeService([opiekun({ deniedPermissions: ['vehicles.read'] })]);
+
+      await svc.update('u-op', { role: 'planista' });
+
+      expect(repo.update).toHaveBeenCalledWith('u-op', { role: 'planista' });
+    });
+
+    it('no role / leader change → stored lists are left alone, even inert entries', async () => {
+      const { svc, repo } = makeService([opiekun({ deniedPermissions: ['gone.permission'] })]);
+
+      await svc.update('u-op', { name: 'Nowa nazwa' });
+
+      expect(repo.update).toHaveBeenCalledWith('u-op', { name: 'Nowa nazwa' });
+    });
+
+    it('the updateUser audit row covers the prune: before has the old list, the response the new one', async () => {
+      const existing = opiekun({ deniedPermissions: [DELETE] });
+      const { svc } = makeService([existing]);
+      const store: AuditContextStore = {
+        actor: { userId: 'admin-1', userRole: 'admin' } as AuditContextStore['actor'],
+        ipAddress: null,
+      };
+
+      const out = await AuditContext.run(store, () => svc.update('u-op', { role: 'planista' }));
+
+      expect(store.before).toMatchObject({ role: 'opiekun', deniedPermissions: [DELETE] });
+      expect(out).toMatchObject({ role: 'planista', deniedPermissions: [] });
+    });
+
+    // ── directory-managed accounts ──
+
+    it('both lists are editable on a managedBy = magspace account', async () => {
+      const { svc, repo } = makeService([
+        planista({ managedBy: 'magspace', authProvider: 'google', magspaceEmployeeId: 'e-1' }),
+      ]);
+
+      await expect(svc.update('u-pl', { deniedPermissions: ['gps.read'] })).resolves.toMatchObject({
+        deniedPermissions: ['gps.read'],
+      });
+      expect(repo.update).toHaveBeenCalledWith('u-pl', { deniedPermissions: ['gps.read'] });
+    });
+
+    // ── decision Q5: a carrier keeps its role ──
+
+    it('422 USER_CARRIER_ROLE_LOCKED: a role in the body of a przewoznik row (bug fix Q5)', async () => {
+      const { svc, repo } = makeService([carrier()]);
+
+      await expect(svc.update('u-car', { role: 'pracownik', name: 'X' })).rejects.toMatchObject({
+        status: 422,
+        response: { extensions: { code: 'USER_CARRIER_ROLE_LOCKED' } },
+      });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('a przewoznik row without a role in the body is edited as before', async () => {
+      const { svc } = makeService([carrier()]);
+
+      await expect(
+        svc.update('u-car', { name: 'Firma X', extraPermissions: [READ] }),
+      ).resolves.toMatchObject({ role: 'przewoznik', name: 'Firma X', extraPermissions: [READ] });
+    });
+
+    it('the refusal is specific to przewoznik rows — other roles still change role', async () => {
+      const { svc } = makeService([opiekun()]);
+
+      await expect(svc.update('u-op', { role: 'pracownik' })).resolves.toMatchObject({ role: 'pracownik' });
+    });
+
+    // ── DTO ──
+
+    it('toDto: both lists, unknown stored ids removed, catalog order', () => {
+      const { svc } = makeService();
+
+      const dto = svc.toDto(
+        carrier({ extraPermissions: [ADD, 'gone.permission', READ], deniedPermissions: ['x.y'] }),
+      );
+
+      expect(dto.extraPermissions).toEqual([READ, ADD]);
+      expect(dto.deniedPermissions).toEqual([]);
     });
   });
 });

@@ -57,6 +57,9 @@ function user(over: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: NOW,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: NOW,
     updatedAt: NOW,
@@ -625,6 +628,85 @@ describe('DirectoryReconcileService.run', () => {
       ),
     ).toBe(true);
     warn.mockRestore();
+  });
+});
+
+
+// ── docs/25 §3 B6 — per-user permission overrides ─────────────
+describe('DirectoryReconcileService.run — permission overrides (docs/25 B6)', () => {
+  it('a role change prunes the stored overrides in the same UPDATE and writes a system row', async () => {
+    const u = user({ role: 'opiekun', deniedPermissions: ['carrier_documents.delete', 'vehicles.read'] });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(u.id, {
+      role: 'planista',
+      lider: false,
+      directorySyncedAt: NOW,
+      extraPermissions: [],
+      deniedPermissions: ['vehicles.read'],
+    });
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'system.pruneUserPermissions',
+        actor: 'system',
+        targetKey: u.login,
+        metadata: { trigger: 'reconcile', removed: { extra: [], denied: ['carrier_documents.delete'] } },
+      }),
+    );
+  });
+
+  it('a leader demotion prunes a denied leader right', async () => {
+    const u = user({ role: 'planista', lider: true, deniedPermissions: ['vehicles.planner_transfer.decide'] });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).toHaveBeenCalledWith(
+      u.id,
+      expect.objectContaining({ lider: false, deniedPermissions: [] }),
+    );
+  });
+
+  it('a role change with nothing to prune writes exactly the pre-B6 UPDATE, no prune row', async () => {
+    const u = user({ role: 'dyspozytor', deniedPermissions: ['vehicles.read'] });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).toHaveBeenCalledWith(u.id, { role: 'planista', lider: false, directorySyncedAt: NOW });
+    expect(h.audit.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'system.pruneUserPermissions' }),
+    );
+  });
+
+  it('report mode prunes nothing (it writes nothing)', async () => {
+    const u = user({ role: 'opiekun', deniedPermissions: ['carrier_documents.delete'] });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee()],
+      accessFor: () => ({ role: 'planista', lider: false }),
+      mode: 'report',
+    });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).not.toHaveBeenCalled();
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('an override account is never re-pointed, so never pruned — and never seeded', async () => {
+    const u = user({ role: 'weryfikator', roleOverride: 'weryfikator', deniedPermissions: ['km.verify'] });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
+
+    await h.svc.run(NOW);
+
+    for (const [, data] of h.users.update.mock.calls) {
+      expect(data).not.toHaveProperty('extraPermissions');
+      expect(data).not.toHaveProperty('deniedPermissions');
+    }
   });
 });
 

@@ -41,6 +41,7 @@ import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { assertLiderPair } from '../users/lider-pair';
+import { overridePruneFor, pruneAuditEntry } from '../users/permission-overrides';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import {
   DirectoryUnavailableError,
@@ -160,6 +161,11 @@ export class DirectoryService {
    * `lider` is the mapping's flag and follows the same ownership rule as the
    * role (docs/28 §2): applied when the role comes from the mapping, ignored
    * — the stored flag stays — when `roleOverride` is set.
+   *
+   * The per-user permission overrides (docs/25 §3 B6) are never taken from
+   * MAGSpace: a new account starts without any, and a sync only prunes the
+   * entries its `(role, lider)` change no longer admits
+   * (`system.pruneUserPermissions`).
    */
   async provisionOrSync(args: {
     existing: UserRow | null;
@@ -241,6 +247,11 @@ export class DirectoryService {
       existing.magspaceEmployeeId !== employee.id ||
       existing.managedBy !== 'magspace';
 
+    // docs/25 B6 — the directory never sets the override lists; it only prunes
+    // what the pair it is about to write no longer admits, in this UPDATE.
+    const next = { role: effectiveRole, lider: effectiveLider };
+    const prune = overridePruneFor(existing, next);
+
     const updated = await this.users.update(existing.id, {
       email: employee.email,
       name,
@@ -256,6 +267,7 @@ export class DirectoryService {
       googleSub,
       magspaceEmployeeId: employee.id,
       directorySyncedAt: new Date(),
+      ...(prune ? prune.data : {}),
     });
 
     if (changed) {
@@ -282,6 +294,7 @@ export class DirectoryService {
         actor: { userId: updated.id, userRole: updated.role as Role },
       });
     }
+    if (prune) await this.audit.log(pruneAuditEntry(existing, next, prune, 'signIn'));
     return updated;
   }
 
@@ -349,7 +362,10 @@ export class DirectoryService {
    * (or on its old role) until the person's next sign-in.
    *
    * Audited by the route's `@Audit` interceptor (actor = the admin); this only
-   * contributes the `before` snapshot and the business metadata.
+   * contributes the `before` snapshot and the business metadata — plus, when
+   * the new `(role, lider)` no longer admits some of the account's per-user
+   * permission overrides (docs/25 §3 B6), the `system.pruneUserPermissions`
+   * row of that prune. The grant never SETS the overrides.
    *
    * `lider` (docs/28 §2) is written with the role, and — being a hand-granted
    * role's flag — is then left alone by every sync. This is the only one-step
@@ -474,6 +490,8 @@ export class DirectoryService {
     // `PATCH /users/:id`. Only this account's `liderId` is touched: if it is
     // itself a leader, its planisci keep pointing at it (U10).
     const dropsLeaderLink = role !== 'planista' && existing.liderId !== null;
+    // docs/25 B6 — prune (never seed) the override lists for the new pair.
+    const prune = overridePruneFor(existing, { role, lider });
     // One UPDATE: `role`, `roleOverride` and `lider` must land together — the
     // CHECK judges the final (role, lider), and the next sync reads
     // (roleOverride, lider).
@@ -484,7 +502,11 @@ export class DirectoryService {
       ...(dropsLeaderLink ? { liderId: null } : {}),
       active: true,
       directorySyncedAt: new Date(),
+      ...(prune ? prune.data : {}),
     });
+    if (prune) {
+      await this.audit.log(pruneAuditEntry(existing, { role, lider }, prune, 'grantAccess'));
+    }
     return { user, outcome: existing.active ? 'updated' : 'reactivated' };
   }
 

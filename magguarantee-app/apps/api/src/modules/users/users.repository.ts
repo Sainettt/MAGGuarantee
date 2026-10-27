@@ -77,6 +77,15 @@ export type UserRow = {
    * admin otherwise. Not `liderId` (whose leader this user has).
    */
   lider: boolean;
+  /**
+   * Per-user permission overrides (docs/25 §3 B6), exactly as stored: text[]
+   * with no DB check against the catalog, so a value may be unknown or no
+   * longer fit the role — `common/authz/effective-permissions.ts` filters both
+   * lists on every read. Written by an admin (`PATCH /users/:id`); the
+   * directory only ever prunes them (`permission-overrides.ts`).
+   */
+  extraPermissions: string[];
+  deniedPermissions: string[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -165,6 +174,27 @@ export class UsersRepository {
       [INCLUDE_SOFT_DELETED]: true,
     } as unknown as Prisma.UserFindFirstArgs);
     return row !== null;
+  }
+
+  /**
+   * `UserDto.carrierId` (docs/25 §3 B6, decision Q2): the live Carrier row
+   * owned by this user, or null. One lookup on the UNIQUE `Carrier.userId`
+   * index — the same predicate `CarrierOwnershipGuard` uses, so the id the web
+   * gets is exactly the one the guard will accept.
+   *
+   * A separate query on purpose, called only for a `przewoznik` and only where
+   * a `UserDto` is built (`/auth/me`, the auth responses). Nesting
+   * `carrierProfile` into `findById` would cost every request of every user a
+   * second round-trip: Prisma 5 without the `relationJoins` preview resolves a
+   * relation select with its own SELECT, and `findById` backs
+   * `JwtAccessStrategy`.
+   */
+  async findOwnCarrierId(userId: string): Promise<string | null> {
+    const row = await this.prisma.client.carrier.findFirst({
+      where: { userId, deletedAt: null },
+      select: { id: true },
+    });
+    return row?.id ?? null;
   }
 
   async incrementFailedAttempts(id: string): Promise<number> {
@@ -401,6 +431,12 @@ export class UsersRepository {
        * `user_lider_requires_lider_role` sees only the final pair.
        */
       lider: boolean;
+      /**
+       * docs/25 §3 B6 — validated (admin) or pruned (`pruneOverrides`) by the
+       * caller against the FINAL `(role, lider)` of this same update.
+       */
+      extraPermissions: string[];
+      deniedPermissions: string[];
     }>,
   ): Promise<UserRow> {
     const row = await this.prisma.user.update({

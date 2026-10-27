@@ -27,7 +27,12 @@ import {
 
 import { type UploadedFile as AttachmentFile } from '../../common/attachments';
 import { Audit } from '../../common/audit';
-import { OpiekunOwns, OpiekunOwnershipGuard } from '../../common/guards';
+import {
+  CarrierOwns,
+  CarrierOwnershipGuard,
+  OpiekunOwns,
+  OpiekunOwnershipGuard,
+} from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { clientIp } from '../../common/utils/client-ip';
 import {
@@ -53,16 +58,27 @@ const MULTIPART_OPTIONS = {
  * `PermissionsGuard`; mirrored per route in the generated fixture
  * `common/authz/__fixtures__/endpoint-permissions.snapshot.json`):
  * `carrier_documents.read` (list, download), `.add` (upload), `.delete`
- * (delete) — today all three held by admin / opiekun(own), the same set as the
- * carrier CRUD surface. The carrier `:id` is a route param on every
- * endpoint — including the multipart upload — so `OpiekunOwnershipGuard`
- * (`@OpiekunOwns('id','param','carrierId')`) enforces opiekun ownership
- * without needing to read the request body. `pracownik` holds no
- * `carrier_documents.*` permission (claims-only role per
+ * (delete). By role all three are held by admin and opiekun; since B6
+ * (docs/25 §3 B6, first real case) an admin can grant `.read` / `.add` — never
+ * `.delete` — to ONE przewoznik (`User.extraPermissions`, `GRANTABLE_EXTRA`).
+ *
+ * Scope is the two ownership guards, because neither service has a role
+ * branch — the guards ARE the scope. The carrier `:id` is a route param on
+ * every endpoint, including the multipart upload, so both work without
+ * reading the body (guards run before the multer interceptor):
+ *  - `OpiekunOwnershipGuard` (`@OpiekunOwns('id','param','carrierId')`) — an
+ *    opiekun only on carriers where `opiekunId = user.sub`; every other role
+ *    passes;
+ *  - `CarrierOwnershipGuard` (`@CarrierOwns('id','param','carrierId')`) — a
+ *    przewoznik only on his OWN carrier (`Carrier.userId = user.sub`), 403 on
+ *    anyone else's; every other role passes. On DELETE it is defence in depth:
+ *    `.delete` is not grantable to a przewoznik, so `PermissionsGuard` already
+ *    answers 403.
+ * `pracownik` holds no `carrier_documents.*` permission (claims-only role per
  * docs/03-roles.md#pracownik).
  */
 @Controller('carriers/:id/attachments')
-@UseGuards(OpiekunOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class CarrierAttachmentsController {
   private readonly logger = new Logger(CarrierAttachmentsController.name);
 
@@ -72,6 +88,7 @@ export class CarrierAttachmentsController {
   @HttpCode(HttpStatus.CREATED)
   @RequirePermission('carrier_documents.add')
   @OpiekunOwns('id', 'param', 'carrierId')
+  @CarrierOwns('id', 'param', 'carrierId')
   @UseInterceptors(FileInterceptor(ATTACHMENT_FILE_FIELD, MULTIPART_OPTIONS))
   @Audit({
     action: 'uploadCarrierAttachment',
@@ -97,6 +114,7 @@ export class CarrierAttachmentsController {
   @Get()
   @RequirePermission('carrier_documents.read')
   @OpiekunOwns('id', 'param', 'carrierId')
+  @CarrierOwns('id', 'param', 'carrierId')
   async list(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<CarrierAttachmentDto[]> {
@@ -106,6 +124,7 @@ export class CarrierAttachmentsController {
   @Get(':attachmentId/download')
   @RequirePermission('carrier_documents.read')
   @OpiekunOwns('id', 'param', 'carrierId')
+  @CarrierOwns('id', 'param', 'carrierId')
   async download(
     @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
@@ -143,6 +162,7 @@ export class CarrierAttachmentsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission('carrier_documents.delete')
   @OpiekunOwns('id', 'param', 'carrierId')
+  @CarrierOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'deleteCarrierAttachment',
     targetType: 'CarrierAttachment',

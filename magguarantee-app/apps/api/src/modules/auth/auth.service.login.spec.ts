@@ -61,6 +61,9 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: NOW,
     updatedAt: NOW,
@@ -90,6 +93,8 @@ function makeHarness(opts: { user?: UserRow | null; passwordOk?: boolean; attemp
   const users = {
     findByLogin: jest.fn(async () => user),
     findById: jest.fn(async () => user),
+    // docs/25 B6 — `UserDto.carrierId`; only ever called for a przewoznik.
+    findOwnCarrierId: jest.fn(async (): Promise<string | null> => 'car-own-1'),
     incrementFailedAttempts: jest.fn(async () => opts.attempts ?? 1),
     lockUntil: jest.fn(async () => undefined),
     resetFailedAttempts: jest.fn(async () => undefined),
@@ -446,7 +451,10 @@ describe('AuthService.verifyCode — UserDto.permissions', () => {
       mustChangePassword: false,
       lider: false,
       permissions: toPermissionList(new Set(permissionsFor('opiekun', false))),
+      carrierId: null,
     });
+    // Not a carrier → no carrier lookup at all.
+    expect(h.users.findOwnCarrierId).not.toHaveBeenCalled();
     expect(res.user.permissions).toEqual(permissionsFor('opiekun', false));
   });
 
@@ -466,6 +474,41 @@ describe('AuthService.verifyCode — UserDto.permissions', () => {
 
     expect(res.user.permissions).toEqual(permissionsFor('planista', false));
     expect(res.user.permissions).not.toContain('vehicles.planner_transfer.decide');
+  });
+
+  it('B6: the per-user overrides land in UserDto.permissions (grant + denial)', async () => {
+    const h = makeHarness({
+      user: makeUser({
+        role: 'przewoznik',
+        extraPermissions: ['carrier_documents.read', 'carrier_documents.add'],
+        deniedPermissions: ['delegations.cancel'],
+      }),
+    });
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user.permissions).toContain('carrier_documents.read');
+    expect(res.user.permissions).toContain('carrier_documents.add');
+    expect(res.user.permissions).not.toContain('carrier_documents.delete');
+    expect(res.user.permissions).not.toContain('delegations.cancel');
+  });
+
+  it('B6: a przewoznik gets his own Carrier.id as carrierId', async () => {
+    const h = makeHarness({ user: makeUser({ id: 'u-1', role: 'przewoznik' }) });
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user.carrierId).toBe('car-own-1');
+    expect(h.users.findOwnCarrierId).toHaveBeenCalledWith('u-1');
+  });
+
+  it('B6: a przewoznik without a Carrier row gets carrierId null', async () => {
+    const h = makeHarness({ user: makeUser({ role: 'przewoznik' }) });
+    h.users.findOwnCarrierId.mockResolvedValueOnce(null);
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user.carrierId).toBeNull();
   });
 
   it('never puts permissions into the access-token claims', async () => {

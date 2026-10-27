@@ -8,8 +8,7 @@
 
 import { z } from 'zod';
 
-import { PERMISSIONS } from '../permissions';
-import { AssignableRoleSchema } from './common';
+import { AssignableRoleSchema, PermissionSchema } from './common';
 import { PasswordSchema } from './users';
 
 // ─── Roles ────────────────────────────────────────────────
@@ -33,12 +32,11 @@ export type Role = z.infer<typeof Role>;
 // ─── Permissions ──────────────────────────────────────────
 
 /**
- * One catalog permission (docs/25 §2). The enum lives here, not in
- * `../permissions`: that module must stay runtime-dependency-free (the Next.js
- * edge middleware imports it; a test enforces "type imports only"). The TS
- * type is `Permission`, exported from `../permissions`.
+ * One catalog permission (docs/25 §2) — declared in `./common` since B6 (the
+ * per-user overrides in `./users` need it, and `./users` must not import this
+ * file); re-exported here, where it lived before.
  */
-export const PermissionSchema = z.enum(PERMISSIONS);
+export { PermissionSchema } from './common';
 
 // ─── Login flow ───────────────────────────────────────────
 
@@ -154,9 +152,10 @@ export type ResetPasswordForm = z.infer<typeof ResetPasswordFormSchema>;
 
 // ─── User DTO ─────────────────────────────────────────────
 
-// Phase 1 keeps this minimal — Phase 2+ extends with carrierId, vehicles once
-// Carrier/Vehicle ship. `alternateRoles` (multi-role) — не планируется, см.
-// docs/03 §Multi-role.
+// The session profile (`GET /auth/me` and the `{ user }` of every auth
+// response). `carrierId` landed with docs/25 B6; a `vehicles` list was never
+// added (the carrier panel loads its fleet itself). `alternateRoles`
+// (multi-role) — не планируется, см. docs/03 §Multi-role.
 export const UserDto = z.object({
   id: z.string().uuid(),
   login: z.string(),
@@ -179,15 +178,26 @@ export const UserDto = z.object({
   lider: z.boolean(),
   /**
    * Effective permissions of this user (docs/25 §3 B4), deduplicated, in
-   * catalog (`PERMISSIONS`) order. Today = `permissionsFor(role, lider)`; B6
-   * adds per-user extra/denied overrides on the api side, so clients must treat
-   * this list as AUTHORITATIVE and never re-derive it from `role`. The only
-   * allowed fallback is `permissionsFor(role, lider)` while an api that does
-   * not send the field yet is still deployed (version skew).
+   * catalog (`PERMISSIONS`) order. Since B6 =
+   * `effectivePermissionsFor(role, lider, extraPermissions, deniedPermissions)`
+   * — the role's set plus the rights an admin granted this person, minus the
+   * ones he revoked — so clients must treat this list as AUTHORITATIVE and
+   * never re-derive it from `role`. The only allowed fallback is
+   * `permissionsFor(role, lider)` while an api that does not send the field yet
+   * is still deployed (version skew) — it misses the overrides.
    *
    * Built from the same DB row as `role` / `lider` — never a JWT claim.
    */
   permissions: z.array(PermissionSchema),
+  /**
+   * The carrier's own `Carrier.id` (docs/25 §3 B6, decision Q2): set for a
+   * `przewoznik` that has a (live) Carrier row, `null` for every other user.
+   * The web uses it for the carrier-scoped `/carriers/:id/...` calls — e.g. the
+   * «Dokumenty» tab of a carrier holding `carrier_documents.read`; the api
+   * still checks it against the session (`CarrierOwnershipGuard`), so it is a
+   * convenience, not a credential. Read from the database, never a JWT claim.
+   */
+  carrierId: z.string().uuid().nullable(),
 });
 export type UserDto = z.infer<typeof UserDto>;
 

@@ -29,6 +29,8 @@ import {
 
 import { Audit } from '../../common/audit';
 import {
+  CarrierOwns,
+  CarrierOwnershipGuard,
   OpiekunOwns,
   OpiekunOwnershipGuard,
 } from '../../common/guards';
@@ -49,7 +51,8 @@ import { CarriersService } from './carriers.service';
  * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json`; who
  * holds what is `ROLE_PERMISSIONS` in `@magguarantee/shared`:
  *  - GET (list / detail): `carriers.read` (admin / opiekun(own))
- *  - GET documents overview: `carrier_documents.read` (admin / opiekun(own))
+ *  - GET documents overview: `carrier_documents.read` (admin / opiekun(own) /
+ *      przewoznik(own) holding the B6 per-user grant — docs/25 §3 B6)
  *  - POST: `carriers.write` (admin / opiekun — auto-self-assign for opiekun)
  *  - PATCH / deactivate / reactivate / reset-password: `carriers.write`
  *      (admin / opiekun(own))
@@ -89,18 +92,23 @@ export class CarriersController {
   }
 
   /**
-   * READ-ONLY documents overview for the opiekun "Dokumenty" tab — every live
+   * READ-ONLY documents overview for the "Dokumenty" tab — every live
    * document tied to the carrier (company docs + per-vehicle / per-trailer /
    * per-driver files + ADR-flagged vehicles), grouped for the UI. Downloads
    * reuse the EXISTING per-entity download routes (the DTO carries the ids).
    * Gate: `carrier_documents.read` (the documents permission, like the
-   * attachments endpoints — not `carriers.read`). Same scoping as the carrier
-   * detail / attachments endpoints: admin sees all, opiekun only their own
-   * carriers (`OpiekunOwnershipGuard`). Per docs/13-api-design.md#carriers.
+   * attachments endpoints — not `carriers.read`): admin and opiekun by role,
+   * a przewoznik only through the per-user grant (docs/25 §3 B6). Scope =
+   * the ownership guards (`CarrierDocumentsService` has no role branch):
+   * admin sees all, opiekun only their own carriers (`OpiekunOwnershipGuard`
+   * on the class), przewoznik only his own carrier (`CarrierOwnershipGuard`,
+   * this route only). Per docs/13-api-design.md#carriers.
    */
   @Get(':id/documents/overview')
   @RequirePermission('carrier_documents.read')
+  @UseGuards(CarrierOwnershipGuard)
   @OpiekunOwns('id', 'param', 'carrierId')
+  @CarrierOwns('id', 'param', 'carrierId')
   async documentsOverview(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<CarrierDocumentsOverviewDto> {

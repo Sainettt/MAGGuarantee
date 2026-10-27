@@ -1,4 +1,5 @@
-// Wire-contract guard for `UserDto.permissions` (docs/25 §3 B4).
+// Wire-contract guard for `UserDto.permissions` (docs/25 §3 B4) and
+// `UserDto.carrierId` (B6).
 //
 // The api fills it with the user's effective permissions in catalog order;
 // the web parses `/auth/me` and every session-issuing `{ user }` with this
@@ -20,6 +21,7 @@ const BASE = {
   role: 'planista',
   mustChangePassword: false,
   lider: true,
+  carrierId: null,
 } as const;
 
 describe('PermissionSchema', () => {
@@ -53,5 +55,28 @@ describe('UserDto.permissions', () => {
   it('rejects an unknown permission', () => {
     const body = { ...BASE, permissions: ['claims.read', 'claims.delete'] };
     expect(UserDto.safeParse(body).success).toBe(false);
+  });
+});
+
+describe('UserDto.carrierId (docs/25 B6, decision Q2)', () => {
+  const permissions = [...permissionsFor('przewoznik')];
+
+  it('carries the Carrier.id of a przewoznik (his own company)', () => {
+    const carrierId = '7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f';
+    const body = { ...BASE, role: 'przewoznik', lider: false, permissions, carrierId };
+    expect(UserDto.parse(body)).toEqual(body);
+  });
+
+  it('is null for everyone else', () => {
+    expect(UserDto.parse({ ...BASE, permissions: [] }).carrierId).toBeNull();
+  });
+
+  it('is required — null, never omitted', () => {
+    const { carrierId: _omit, ...withoutIt } = BASE;
+    expect(UserDto.safeParse({ ...withoutIt, permissions: [] }).success).toBe(false);
+  });
+
+  it('must be a uuid', () => {
+    expect(UserDto.safeParse({ ...BASE, permissions: [], carrierId: 'car-1' }).success).toBe(false);
   });
 });

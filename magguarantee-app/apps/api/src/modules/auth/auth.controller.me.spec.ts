@@ -19,18 +19,33 @@ import { makeAuthUser } from '../../common/testing/make-auth-user';
 import type { Env } from '../../config/env.schema';
 import type { AuthUser } from './decorators/current-user.decorator';
 import { AuthController } from './auth.controller';
-import type { AuthService } from './auth.service';
+import { AuthService } from './auth.service';
 import { PermissionsGuard } from './guards/permissions.guard';
 
 const DECIDE: Permission = 'vehicles.planner_transfer.decide';
 
+/**
+ * The carrier lookup behind `UserDto.carrierId` (docs/25 B6): the REAL
+ * `AuthService.ownCarrierId`, run against a fake `UsersService`, so the "no
+ * query for a non-carrier" branch is the production one.
+ */
+const findOwnCarrierId = jest.fn(async (_userId: string): Promise<string | null> => 'car-own-1');
+
 function me(user: AuthUser): Promise<UserDto> {
+  const auth = {
+    users: { findOwnCarrierId },
+    ownCarrierId: AuthService.prototype.ownCarrierId,
+  };
   const controller = new AuthController(
-    {} as unknown as AuthService,
+    auth as unknown as AuthService,
     {} as unknown as ConfigService<Env, true>,
   );
   return controller.me(user);
 }
+
+beforeEach(() => {
+  findOwnCarrierId.mockClear();
+});
 
 describe('GET /auth/me — permissions (docs/25 B4)', () => {
   it.each([false, true])(
@@ -90,9 +105,51 @@ describe('GET /auth/me — permissions (docs/25 B4)', () => {
       mustChangePassword: false,
       lider: true,
       permissions: [...permissionsFor('planista', true)],
+      carrierId: null,
     });
     // `z.object` strips unknown keys — equality after parse means none leaked.
     expect(UserDto.parse(body)).toEqual(body);
+  });
+});
+
+describe('GET /auth/me — carrierId (docs/25 B6, decision Q2)', () => {
+  it('a przewoznik gets his own Carrier.id, looked up by his user id', async () => {
+    const body = await me(makeAuthUser('przewoznik', { sub: 'u-carrier-7' }));
+
+    expect(body.carrierId).toBe('car-own-1');
+    expect(findOwnCarrierId).toHaveBeenCalledWith('u-carrier-7');
+  });
+
+  it('a przewoznik without a live Carrier row gets null', async () => {
+    findOwnCarrierId.mockResolvedValueOnce(null);
+
+    const body = await me(makeAuthUser('przewoznik'));
+
+    expect(body.carrierId).toBeNull();
+  });
+
+  it.each(RoleSchema.options.filter((r) => r !== 'przewoznik'))(
+    '%s: null, without a carrier lookup',
+    async (role) => {
+      const body = await me(makeAuthUser(role));
+
+      expect(body.carrierId).toBeNull();
+      expect(findOwnCarrierId).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a carrier holding the B6 grant: the body lists it next to his carrierId', async () => {
+    const granted = new Set<Permission>([
+      ...permissionsFor('przewoznik'),
+      'carrier_documents.read',
+      'carrier_documents.add',
+    ]);
+
+    const body = await me(makeAuthUser('przewoznik', { permissions: granted }));
+
+    expect(body.permissions).toEqual(expect.arrayContaining(['carrier_documents.read', 'carrier_documents.add']));
+    expect(body.permissions).not.toContain('carrier_documents.delete');
+    expect(body.carrierId).toBe('car-own-1');
   });
 });
 

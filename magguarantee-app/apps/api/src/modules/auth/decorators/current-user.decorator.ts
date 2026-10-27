@@ -34,10 +34,10 @@ export interface AuthUser {
   // Optional on the type so the existing `AuthUser` fixtures stay valid; the
   // strategy ALWAYS sets it. `undefined` means "not a leader".
   lider?: boolean;
-  // Effective permissions of this request (docs/25 §3 B2). Computed ONCE in
-  // JwtAccessStrategy.validate from `permissionsFor(role, lider)` — the same
-  // DB-sourced pair as above — and read by PermissionsGuard and `can()`
-  // (common/authz/can.ts). B6 adds per-user overrides at that single point.
+  // Effective permissions of this request (docs/25 §3 B2, B6). Computed ONCE in
+  // JwtAccessStrategy.validate from the same DB row as above —
+  // `effectivePermissionsFor(role, lider, extraPermissions, deniedPermissions)`
+  // — and read by PermissionsGuard and `can()` (common/authz/can.ts).
   //
   // Required on purpose: a user object without it would make every
   // `@RequirePermission` route answer 403 (the guard fails closed and never

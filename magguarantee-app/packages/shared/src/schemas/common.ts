@@ -10,6 +10,8 @@
 
 import { z } from 'zod';
 
+import { PERMISSIONS } from '../permissions';
+
 // ─── Form-friendly preprocessor ───────────────────────────
 
 /**
@@ -184,6 +186,21 @@ export type LiderRole = LiderRoleSchema;
 export function isLiderRole(role: string): role is LiderRole {
   return (LIDER_ROLES as readonly string[]).includes(role);
 }
+
+// ─── Permissions (docs/25) ────────────────────────────────
+
+/**
+ * One catalog permission (docs/25 §2). The enum lives in the schemas, not in
+ * `../permissions`: that module must stay runtime-dependency-free (the Next.js
+ * edge middleware imports it; a test enforces "type imports only"). The TS
+ * type is `Permission`, exported from `../permissions`.
+ *
+ * Defined here (re-exported from `./auth`, where it lived until B6) because
+ * `./users` needs it for the per-user overrides and must not import `./auth` —
+ * that would close the import cycle described at
+ * {@link USER_LIDER_REQUIRES_LIDER_ROLE}.
+ */
+export const PermissionSchema = z.enum(PERMISSIONS);
 
 /**
  * 422 — the pair `(role, lider)` breaks `lider ⇒ role ∈ LIDER_ROLES`. Carried

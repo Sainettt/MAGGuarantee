@@ -365,6 +365,37 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
     expect(out.entry!.targetKey).toBe('user-uuid-7');
   });
 
+  it('PATCH /users/:id → a per-user permission change (docs/25 B6) lands in updateUser before → after', async () => {
+    // Decision Q3: an admin edit (grant, revocation, or the prune a role
+    // change forces) is recorded by THIS row — `UserDtoFull` carries both
+    // lists — not by a separate `system.pruneUserPermissions` row.
+    const out = await runAuditedHandler({
+      controller: UsersController,
+      method: 'update',
+      req: req({
+        params: { id: 'user-uuid-8' },
+        method: 'PATCH',
+        url: '/api/v1/users/user-uuid-8',
+        body: { extraPermissions: ['carrier_documents.read', 'carrier_documents.add'] },
+      }),
+      duringHandler: () =>
+        AuditContext.setBefore({ id: 'user-uuid-8', extraPermissions: [], deniedPermissions: [] }),
+      result: {
+        id: 'user-uuid-8',
+        extraPermissions: ['carrier_documents.read', 'carrier_documents.add'],
+        deniedPermissions: [],
+      },
+    });
+
+    expect(out.entries).toHaveLength(1);
+    expect(out.entry!.action).toBe('updateUser');
+    expect(out.entry!.before).toMatchObject({ extraPermissions: [], deniedPermissions: [] });
+    expect(out.entry!.after).toMatchObject({
+      extraPermissions: ['carrier_documents.read', 'carrier_documents.add'],
+      deniedPermissions: [],
+    });
+  });
+
   it('DELETE /users/:id → deleteUser row, void result', async () => {
     const out = await runAuditedHandler({
       controller: UsersController,

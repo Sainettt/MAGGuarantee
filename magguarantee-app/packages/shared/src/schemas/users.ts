@@ -14,6 +14,7 @@ import {
   AssignableRoleSchema,
   BooleanQueryParamSchema,
   IsoDateTimeSchema,
+  PermissionSchema,
   RoleSchema,
   UuidSchema,
   emptyStringToUndefined,
@@ -81,6 +82,62 @@ const LiderIdFieldSchema = z.preprocess(
   (v) => (v === '' ? null : v),
   UuidSchema.nullable().optional(),
 );
+
+// ─── Per-user permission overrides (docs/25 §3 B6) ──────
+
+/**
+ * 422 — `extraPermissions` names a right that may not be granted to the
+ * user's (final) role: not in `GRANTABLE_EXTRA[role]` (`@magguarantee/shared`
+ * permissions). `extensions.permissions` lists the offending ids.
+ */
+export const USER_PERMISSION_NOT_GRANTABLE = 'USER_PERMISSION_NOT_GRANTABLE' as const;
+
+/** Human fallback for {@link USER_PERMISSION_NOT_GRANTABLE} — the web localises by code. */
+export const USER_PERMISSION_NOT_GRANTABLE_MESSAGE =
+  'Tych uprawnień nie można nadać użytkownikowi o tej roli.';
+
+/**
+ * 422 — `deniedPermissions` names a right the user's (final) `(role, lider)`
+ * does not have, so there is nothing to revoke. `extensions.permissions`
+ * lists the offending ids.
+ */
+export const USER_PERMISSION_NOT_REVOCABLE = 'USER_PERMISSION_NOT_REVOCABLE' as const;
+
+/** Human fallback for {@link USER_PERMISSION_NOT_REVOCABLE}. */
+export const USER_PERMISSION_NOT_REVOCABLE_MESSAGE =
+  'Tych uprawnień nie można odebrać — rola użytkownika ich nie daje.';
+
+/**
+ * 422 — a non-empty `deniedPermissions` on a user whose (final) role is
+ * `admin` (decision Q4, 2026-10-27): the administrator role is never narrowed
+ * per person. `extensions.permissions` lists what was sent.
+ */
+export const USER_ADMIN_CANNOT_BE_DENIED = 'USER_ADMIN_CANNOT_BE_DENIED' as const;
+
+/** Human fallback for {@link USER_ADMIN_CANNOT_BE_DENIED}. */
+export const USER_ADMIN_CANNOT_BE_DENIED_MESSAGE =
+  'Administratorowi nie można odebrać uprawnień.';
+
+/**
+ * 422 — `PATCH /users/:id` with a `role` different from the stored one on a
+ * `przewoznik` account (decision Q5, 2026-10-27). A carrier account is bound
+ * to its Carrier row; it is neither created nor converted here. Omit `role`
+ * when editing a carrier.
+ */
+export const USER_CARRIER_ROLE_LOCKED = 'USER_CARRIER_ROLE_LOCKED' as const;
+
+/** Human fallback for {@link USER_CARRIER_ROLE_LOCKED}. */
+export const USER_CARRIER_ROLE_LOCKED_MESSAGE =
+  'Roli przewoźnika nie można zmienić — konto jest powiązane z firmą przewoźnika.';
+
+/**
+ * A request list of catalog permissions: unknown ids are a 400, duplicates are
+ * dropped (first occurrence kept). The service stores the list in catalog
+ * order. `[]` clears the overrides.
+ */
+const PermissionListSchema = z
+  .array(PermissionSchema)
+  .transform((list) => [...new Set(list)]);
 
 /**
  * Password policy — the single source of truth (docs/15-auth-strategy.md
@@ -158,7 +215,9 @@ export const CreateUserRequestSchema = CreateUserSchema.superRefine((value, ctx)
 /**
  * PATCH /users/:id — every field optional. Role can change (e.g. promote a
  * planista to opiekun), but `przewoznik` is still excluded — the admin should
- * use the carrier endpoints for that flow.
+ * use the carrier endpoints for that flow. A `role` that differs from the
+ * stored one on a `przewoznik` account is refused too (422
+ * {@link USER_CARRIER_ROLE_LOCKED}) — omit `role` when editing a carrier.
  *
  * `email` is required at the column level (NOT NULL since the phase3_blocks
  * migration), so PATCH cannot null it — the schema drops `.nullable()` on
@@ -212,6 +271,27 @@ export const UpdateUserSchema = z
      * and refused with 422 `USER_LIDER_REQUIRES_LIDER_ROLE`.
      */
     lider: z.boolean().optional(),
+    /**
+     * Rights granted to THIS user on top of his role (docs/25 §3 B6). Omitted =
+     * leave alone, `[]` = clear. Judged on the MERGED row (final `role`):
+     * every id must be in `GRANTABLE_EXTRA[role]` — else 422
+     * {@link USER_PERMISSION_NOT_GRANTABLE}. Today only `przewoznik` may be
+     * granted anything (`carrier_documents.read` / `.add`).
+     *
+     * Editable on `managedBy = magspace` accounts too: the directory never
+     * sets it, it only prunes entries a role / leader change no longer admits.
+     */
+    extraPermissions: PermissionListSchema.optional(),
+    /**
+     * Rights revoked from THIS user although his role grants them (docs/25 §3
+     * B6). Omitted = leave alone, `[]` = clear. Judged on the MERGED row (final
+     * `role`, `lider`): every id must be in `permissionsFor(role, lider)` —
+     * else 422 {@link USER_PERMISSION_NOT_REVOCABLE}; any id on a final role
+     * `admin` → 422 {@link USER_ADMIN_CANNOT_BE_DENIED}. Denial wins over a
+     * grant. Editable on `managedBy = magspace` accounts, like
+     * `extraPermissions`.
+     */
+    deniedPermissions: PermissionListSchema.optional(),
   })
   .strict();
 export type UpdateUserDto = z.infer<typeof UpdateUserSchema>;
@@ -286,6 +366,18 @@ export const UserDtoSchema = z.object({
   lider: z.boolean(),
   /** Last time the directory refreshed this row. Null for local accounts. */
   directorySyncedAt: IsoDateTimeSchema.nullable(),
+  /**
+   * Rights granted to this user on top of his role (docs/25 §3 B6) — the
+   * stored list with ids outside the catalog removed, in catalog order. Only
+   * the ids in `GRANTABLE_EXTRA[role]` take effect.
+   */
+  extraPermissions: z.array(PermissionSchema),
+  /**
+   * Rights revoked from this user although his role grants them (docs/25 §3
+   * B6) — the stored list with ids outside the catalog removed, in catalog
+   * order. Denial wins over a grant.
+   */
+  deniedPermissions: z.array(PermissionSchema),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

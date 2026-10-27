@@ -35,6 +35,7 @@ import type {
   ReconcileLocalNoticeRow,
   ReconcileRoleChangeRow,
 } from '../mail/templates/directory-reconcile-report';
+import { overridePruneFor, pruneAuditEntry } from '../users/permission-overrides';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import { DirectoryState } from './directory-state';
 import { DirectoryService, type DeprovisionReason } from './directory.service';
@@ -223,10 +224,15 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
         await this.directory.deprovision(item.user, item.reason);
       }
       for (const change of plan.roleChanges) {
+        // docs/25 B6 — prune (never seed) the per-user overrides the new pair
+        // no longer admits, in the same UPDATE as the pair.
+        const next = { role: change.toRole, lider: change.toLider };
+        const prune = overridePruneFor(change.user, next);
         await this.users.update(change.user.id, {
           role: change.toRole,
           lider: change.toLider,
           directorySyncedAt: now,
+          ...(prune ? prune.data : {}),
         });
         await this.audit.log({
           action: 'system.syncUserFromDirectory',
@@ -236,6 +242,9 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
           after: { role: change.toRole, lider: change.toLider },
           actor: 'system',
         });
+        if (prune) {
+          await this.audit.log(pruneAuditEntry(change.user, next, prune, 'reconcile'));
+        }
       }
       for (const change of plan.nameChanges) {
         await this.users.update(change.user.id, {

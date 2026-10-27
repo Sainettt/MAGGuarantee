@@ -88,8 +88,10 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
       // docs/25 B2 — effective permissions, computed ONCE per request from the
       // same DB row; PermissionsGuard and `can()` read only this set and never
       // recompute it from the role. `effectivePermissions` is also what
-      // `UserDto.permissions` is built from (B4), and the single place B6 adds
-      // per-user extra/denied overrides.
+      // `UserDto.permissions` is built from (B4). B6: it reads the same row's
+      // `extraPermissions` / `deniedPermissions` (no extra query — `findById`
+      // returns every column), so a grant or a revocation bites on the next
+      // request.
       permissions: effectivePermissions(user),
     };
   }

@@ -43,6 +43,9 @@ function makeUser(over: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    // docs/25 B6 — no per-user overrides.
+    extraPermissions: [],
+    deniedPermissions: [],
     lider: false,
     createdAt: NOW,
     updatedAt: NOW,
@@ -154,6 +157,52 @@ describe('JwtAccessStrategy.validate', () => {
       const user = await strategy.validate({ sub: 'u-1', role: 'planista', iat: 1 });
 
       expect(user.permissions.has('vehicles.planner_transfer.decide')).toBe(false);
+    });
+  });
+
+  describe('per-user overrides (docs/25 B6)', () => {
+    it('a granted right lands in the set — from the same row, no second query', async () => {
+      const { strategy, findById } = makeStrategy(
+        makeUser({ role: 'przewoznik', extraPermissions: ['carrier_documents.read', 'carrier_documents.add'] }),
+      );
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'przewoznik' });
+
+      expect(user.permissions.has('carrier_documents.read')).toBe(true);
+      expect(user.permissions.has('carrier_documents.add')).toBe(true);
+      expect(user.permissions.has('carrier_documents.delete')).toBe(false);
+      // The users mock has nothing but findById: any other lookup would throw.
+      expect(findById).toHaveBeenCalledTimes(1);
+    });
+
+    it('a revocation bites on the next request', async () => {
+      const { strategy } = makeStrategy(makeUser({ role: 'opiekun', deniedPermissions: ['carrier_documents.delete'] }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'opiekun', iat: 1 });
+
+      expect(user.permissions.has('carrier_documents.delete')).toBe(false);
+      expect([...user.permissions]).toEqual(permissionsFor('opiekun').filter((p) => p !== 'carrier_documents.delete'));
+    });
+
+    it('a non-grantable extra never widens the set', async () => {
+      const { strategy } = makeStrategy(makeUser({ role: 'planista', extraPermissions: ['claims.verify', 'users.manage'] }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'planista' });
+
+      expect([...user.permissions]).toEqual(permissionsFor('planista'));
+    });
+
+    it('is exactly effectivePermissions(row) for a row with overrides', async () => {
+      const row = makeUser({
+        role: 'przewoznik',
+        extraPermissions: ['carrier_documents.add', 'gone.permission'],
+        deniedPermissions: ['delegations.cancel'],
+      });
+      const { strategy } = makeStrategy(row);
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'przewoznik' });
+
+      expect([...user.permissions]).toEqual([...effectivePermissions(row)]);
     });
   });
 });

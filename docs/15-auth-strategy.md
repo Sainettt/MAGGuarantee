@@ -311,6 +311,10 @@ managed-пользователя пускаем по последней синх
 | `permissionsFor(role, lider = false)` | `ROLE_PERMISSIONS[role] ∪ (lider ? LIDER_PERMISSIONS[role] : [])`, без дублей, в порядке каталога; строка, которая не роль, → `[]` (fail closed) |
 | `hasPermission`, `hasAnyPermission` | проверки над парой `(role, lider)` — для edge и тестов; запросный пользователь проверяется через `AuthUser.permissions` |
 | `rolesSatisfying(required, { lider })` | роли, которые пропускает any-of требование, — для сверки с фикстурой ролей |
+| `GRANTABLE_EXTRA: Partial<Record<Role, readonly Permission[]>>` | B6: какие права можно выдать роли **сверх** её набора. Сегодня только `przewoznik: ['carrier_documents.read', 'carrier_documents.add']`; тесты: ни одно выдаваемое право роль уже не имеет, `carrier_documents.delete` перевозчику не выдаётся |
+| `DEPENDENT_PERMISSIONS`, `permissionsDependingOn(p)` | B6: «право → без чего оно бессмысленно» (`claims.verify → claims.read`, `vehicles.* → vehicles.read`, …), ацикличен. Подсказка для формы при отзыве; api её не применяет |
+| `effectivePermissionsFor(role, lider, extra, denied)` | B6: `(permissionsFor(role, lider) ∪ (extra ∩ GRANTABLE_EXTRA[role])) − denied`, порядок каталога; отзыв побеждает, обе стороны фильтруются (строка вне каталога или не выдаваемая роли — инертна) |
+| `pruneOverrides(role, lider, extra, denied)`, `grantableExtraFor`, `revocablePermissionsFor` | B6: что остаётся от сохранённых overrides при новой паре `(role, lider)` (+ `removed`); у `admin` denied не бывает (`revocablePermissionsFor('admin') = []`) |
 
 Модуль без runtime-зависимостей (только type-импорты, zod нет — тест это
 проверяет): его импортируют api, web и edge-middleware. Таблица для людей —
@@ -321,18 +325,22 @@ managed-пользователя пускаем по последней синх
 ### `AuthUser.permissions` — один расчёт на запрос
 
 `JwtAccessStrategy.validate` перечитывает пользователя из БД на каждом запросе
-(активность, `passwordChangedAt`, `teamId`, `lider`) и там же **один раз** строит
+(активность, `passwordChangedAt`, `teamId`, `lider`, `extraPermissions`,
+`deniedPermissions`) и там же **один раз** строит
 `AuthUser.permissions: ReadonlySet<Permission>` через `effectivePermissions(user)`
-(`apps/api/src/common/authz/effective-permissions.ts`). Сегодня это ровно
-`permissionsFor(role, lider)`; B6 добавит сюда персональные extra/denied-права — и
-только сюда: guard, сервисы и `/auth/me` при этом не меняются.
+(`apps/api/src/common/authz/effective-permissions.ts`). С B6 это
+`effectivePermissionsFor(role, lider, extraPermissions, deniedPermissions)` — права
+роли плюс персональные overrides (§«Персональные права (B6)» ниже); без overrides —
+ровно `permissionsFor(role, lider)`. Overrides читаются из той же строки, лишнего
+запроса нет; guard, сервисы и `/auth/me` их отдельно не знают.
 
 - Тот же модуль (`toPermissionList`) даёт `UserDto.permissions: Permission[]` —
   в `GET /auth/me` и в `{ user }` каждого auth-ответа (`verify-code`, `google`,
   `refresh`, `change-password`), без дублей, в порядке каталога. Web считает этот
   список авторитетным.
-- **В JWT прав нет** (тест закрепляет): понижение роли, снятие флага лидера, а в
-  B6 — отзыв права действуют со следующего запроса, а не после истечения access.
+- **В JWT прав нет** (тест закрепляет): понижение роли, снятие флага лидера,
+  выдача и отзыв персонального права (B6) действуют со следующего запроса, а не
+  после истечения access.
 - Guard и сервисы читают только `req.user.permissions` и **никогда** не
   пересчитывают права из `role`. Пользователь без набора (refresh-payload,
   самодельный объект) прав не имеет. В тестах пользователей строит
@@ -423,7 +431,8 @@ inverse-правила, рантайм его не читает. Сегодня 
   (`Carrier.opiekunId`, `Carrier.userId`, `Vehicle.plannerId`, `User.teamId`, …).
   Каждое такое место помечено `// scope:` с ключом. Правом scope не заменяют
   (docs/25 §0 «Не цель»): выданное другой роли право не должно расширить строки до
-  «все» — риск R4 (docs/25 §6), отсюда `GRANTABLE_EXTRA` в B6.
+  «все» — риск R4 (docs/25 §6), отсюда `GRANTABLE_EXTRA` (B6): роли выдаётся только
+  то, для чего у неё уже есть scope.
 
 ```ts
 // capability — право
@@ -444,6 +453,33 @@ const where = user.role === 'opiekun' ? { opiekunId: user.sub } : {};
 («Brak uprawnień dla tej roli», до сервиса). Ресурсную часть — лидер именно этого
 `fromPlanner`, не автор и не получатель — по-прежнему проверяет сервис
 (`planner-transfer.rules.ts`): правом её не выразить. Edge флага не знает (§Middleware).
+
+### Персональные права (B6)
+
+`User.extraPermissions` / `User.deniedPermissions` (`text[]`, `[]` по умолчанию) —
+право **сверх** роли конкретному человеку и **отзыв** права роли у конкретного
+человека ([docs/25 §3 B6](25-permissions-layer-plan.md)). Роль по-прежнему тип
+пользователя и ключ scope; overrides меняют только набор прав.
+
+- **Формула** (`effectivePermissionsFor` в shared):
+  `(permissionsFor(role, lider) ∪ (extra ∩ GRANTABLE_EXTRA[role])) − denied`, отзыв
+  побеждает. Фильтр с обеих сторон на **чтении**: строка вне каталога, не выдаваемое
+  роли право, отзыв права, которого у роли нет, — инертны, так что пропущенная где-то
+  подрезка доступ не расширит. Неизвестные строки — warn раз на (userId, значение).
+- **Запись** — только admin, `PATCH /users/:id` (docs/13 «Users»), и на `magspace`-учётках
+  тоже. Проверка на слитой строке → 422 `USER_PERMISSION_NOT_GRANTABLE` /
+  `USER_PERMISSION_NOT_REVOCABLE` / `USER_ADMIN_CANNOT_BE_DENIED` (admin не сужается).
+- **Подрезка** при смене `role` / `lider` — тем же UPDATE, одним хелпером
+  (`apps/api/src/modules/users/permission-overrides.ts`) в четырёх местах: `PATCH /users/:id`,
+  вход через Google (sync), «Nadaj dostęp», reconcile. Каталог MAGSpace overrides
+  никогда не выставляет; его подрезка пишется строкой `system.pruneUserPermissions`,
+  админская — строкой `updateUser`.
+- **Scope не расширяется правом.** Выдаётся только то, для чего у роли уже есть scope
+  (`GRANTABLE_EXTRA`). Первый случай: `przewoznik` + `carrier_documents.read` / `.add` —
+  scope «своя фирма» дают `@CarrierOwns('id','param','carrierId')` +
+  `CarrierOwnershipGuard` на пяти роутах документов фирмы; `UserDto.carrierId` отдаёт
+  web'у id его фирмы.
+- `DEPENDENT_PERMISSIONS` — подсказка для формы при отзыве, не правило api.
 
 ### Фикстуры и `npm run authz:snapshot`
 

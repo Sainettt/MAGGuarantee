@@ -17,6 +17,11 @@
 // per-route permission fixture against the frozen roles fixture).
 // Human-readable descriptions and the docs/03 table live in
 // `./permissions-matrix.ts` (not exported from the barrel).
+//
+// Per-user overrides (B6): `GRANTABLE_EXTRA`, `DEPENDENT_PERMISSIONS`,
+// `effectivePermissionsFor` and `pruneOverrides` at the bottom — the api's
+// `common/authz/effective-permissions.ts` is their only runtime consumer for a
+// request's set.
 
 import type { Role } from './schemas/auth';
 import type { LiderRole } from './schemas/common';
@@ -300,4 +305,186 @@ export function rolesSatisfying(
 ): Role[] {
   const lider = options.lider ?? false;
   return ROLE_ORDER.filter((role) => hasAnyPermission(role, required, lider));
+}
+
+// ─── Per-user overrides (docs/25 §3 B6) ────────────────────
+//
+// `User.extraPermissions` grants rights ON TOP of the role, `User.
+// deniedPermissions` removes rights FROM the role's base set. Both are text[]
+// columns without a DB check against the catalog (it changes without a
+// migration), so validity is enforced here twice: the api refuses a write that
+// does not fit (422), and {@link effectivePermissionsFor} filters the stored
+// values again on read — a write path that missed a prune can never widen
+// access.
+
+/**
+ * Which rights may be granted ON TOP of a role (`User.extraPermissions`). A
+ * role without an entry may be granted nothing.
+ *
+ * Every entry must be a right whose data scope the role ALREADY has — a
+ * capability without a scope branch either shows empty screens or, worse,
+ * falls into "sees everything" (docs/25 R4). Example of a refusal: `planista` +
+ * `claims.verify` (no planista branch in the wnioski scope).
+ *
+ * przewoznik → `carrier_documents.read` / `.add` (first real case, decision
+ * 2026-10-23): the documents of the carrier's OWN company, scoped by
+ * `CarrierOwnershipGuard` (`@CarrierOwns('id','param','carrierId')`) on the
+ * five carrier-document routes. Never `.delete` (a test pins it).
+ */
+export const GRANTABLE_EXTRA: Readonly<Partial<Record<Role, readonly Permission[]>>> = {
+  przewoznik: ['carrier_documents.read', 'carrier_documents.add'],
+} satisfies Partial<Record<Role, readonly Permission[]>>;
+
+/**
+ * right → the rights it is useless without. For the UI only: revoking a right
+ * someone else in this map depends on makes the admin form warn and offer to
+ * revoke the dependants too. The api does not enforce it — a user left with
+ * `claims.verify` but without `claims.read` simply gets 403 on the list.
+ *
+ * Not an invariant of the role matrix: eksport and weryfikator hold
+ * `vehicles.rates.read` without `vehicles.read` (they read rates in the
+ * delegation modal only, never on a vehicle card).
+ */
+export const DEPENDENT_PERMISSIONS: Readonly<Partial<Record<Permission, readonly Permission[]>>> = {
+  'claims.verify': ['claims.read'],
+  'claims.verify_pending_authorization': ['claims.verify'],
+  'claims.submit': ['claims.read'],
+  'carrier_documents.add': ['carrier_documents.read'],
+  'carrier_documents.delete': ['carrier_documents.read'],
+  'vehicles.rates.read': ['vehicles.read'],
+  'vehicles.fuel_card.read': ['vehicles.read'],
+  'vehicles.planner_transfer.request': ['vehicles.read'],
+  'vehicles.planner_transfer.decide': ['vehicles.read'],
+  'vehicles.planner_history.read': ['vehicles.read'],
+  'gps.refresh': ['gps.read'],
+  'km.verify': ['km.read'],
+  'delegations.create': ['delegations.read'],
+  'delegations.cancel': ['delegations.read'],
+  'delegations.mark_ready': ['delegations.read'],
+  'delegations.transit': ['delegations.read'],
+} satisfies Partial<Record<Permission, readonly Permission[]>>;
+
+const NONE: readonly Permission[] = [];
+
+/** `GRANTABLE_EXTRA[role]` in catalog order; `[]` for a role without an entry or a non-role. */
+export function grantableExtraFor(role: Role): readonly Permission[] {
+  if (!isRoleKey(role)) return NONE;
+  const grantable = new Set<Permission>(GRANTABLE_EXTRA[role] ?? NONE);
+  return PERMISSIONS.filter((p) => grantable.has(p));
+}
+
+/**
+ * What may be put into `User.deniedPermissions` for `(role, lider)`: the base
+ * set — except for `admin`, who can never be denied anything (decision Q4,
+ * 2026-10-27; the api answers 422 `USER_ADMIN_CANNOT_BE_DENIED`).
+ */
+export function revocablePermissionsFor(role: Role, lider = false): readonly Permission[] {
+  return role === 'admin' ? NONE : permissionsFor(role, lider);
+}
+
+/**
+ * The rights that depend on `permission` (directly or through a chain) in
+ * {@link DEPENDENT_PERMISSIONS}, in catalog order — what the admin form offers
+ * to revoke together with it.
+ */
+export function permissionsDependingOn(permission: Permission): Permission[] {
+  const found = new Set<Permission>();
+  const queue: Permission[] = [permission];
+  while (queue.length > 0) {
+    const current = queue.shift() as Permission;
+    for (const candidate of PERMISSIONS) {
+      if (found.has(candidate) || candidate === permission) continue;
+      if ((DEPENDENT_PERMISSIONS[candidate] ?? NONE).includes(current)) {
+        found.add(candidate);
+        queue.push(candidate);
+      }
+    }
+  }
+  return PERMISSIONS.filter((p) => found.has(p));
+}
+
+/**
+ * The effective rights of one user (docs/25 §3 B6), in catalog order:
+ *
+ *   (permissionsFor(role, lider) ∪ (extra ∩ GRANTABLE_EXTRA[role])) − denied
+ *
+ * Denial wins. Both lists are the STORED values (`string[]`): an entry outside
+ * the catalog matches nothing, an extra outside `GRANTABLE_EXTRA[role]` is
+ * ignored, a denial outside the base set has nothing to remove. On every row a
+ * write path can produce (extra ⊆ grantable, denied ⊆ base, and the two sets
+ * are disjoint — a test pins it) this equals `… − (denied ∩ base)`; on a row
+ * that missed a prune, a right listed in BOTH lists stays denied.
+ *
+ * Fails closed like {@link permissionsFor}: a non-role gets nothing, extras
+ * included.
+ */
+export function effectivePermissionsFor(
+  role: Role,
+  lider: boolean,
+  extra: readonly string[],
+  denied: readonly string[],
+): Permission[] {
+  const granted = new Set<string>(permissionsFor(role, lider));
+  const grantable = new Set<string>(grantableExtraFor(role));
+  for (const p of extra) if (grantable.has(p)) granted.add(p);
+  for (const p of denied) granted.delete(p);
+  return PERMISSIONS.filter((p) => granted.has(p));
+}
+
+/** What {@link pruneOverrides} keeps and what it drops. */
+export interface PrunedOverrides {
+  /** The extras that still fit `(role)`, deduplicated, in catalog order. */
+  extra: Permission[];
+  /** The denials that still fit `(role, lider)`, deduplicated, in catalog order. */
+  denied: Permission[];
+  /** Distinct stored entries dropped — unknown strings included — in input order. */
+  removed: { extra: string[]; denied: string[] };
+}
+
+/**
+ * Drops the overrides a `(role, lider)` no longer admits: extras outside
+ * `GRANTABLE_EXTRA[role]`, denials outside {@link revocablePermissionsFor}
+ * (every denial on `admin`), anything outside the catalog, and an extra that
+ * is denied as well (denial wins, so it never took effect). Applied by the api
+ * whenever `role` or `lider` changes — by an admin or by the directory — in
+ * the same UPDATE (docs/25 §3 B6 «Смена роли»).
+ *
+ * Never changes what the row grants under `(role, lider)`: for every role but
+ * `admin`, `effectivePermissionsFor` of the result equals that of the input (a
+ * test pins it); on `admin` it only drops denials (decision Q4).
+ */
+export function pruneOverrides(
+  role: Role,
+  lider: boolean,
+  extra: readonly string[],
+  denied: readonly string[],
+): PrunedOverrides {
+  const deniedInput = new Set<string>(denied);
+  const keepExtra = splitByAllowed(
+    extra,
+    grantableExtraFor(role).filter((p) => !deniedInput.has(p)),
+  );
+  const keepDenied = splitByAllowed(denied, revocablePermissionsFor(role, lider));
+  return {
+    extra: keepExtra.kept,
+    denied: keepDenied.kept,
+    removed: { extra: keepExtra.dropped, denied: keepDenied.dropped },
+  };
+}
+
+function splitByAllowed(
+  values: readonly string[],
+  allowed: readonly Permission[],
+): { kept: Permission[]; dropped: string[] } {
+  const allowedSet = new Set<string>(allowed);
+  const present = new Set<string>();
+  const dropped: string[] = [];
+  for (const value of values) {
+    if (allowedSet.has(value)) {
+      present.add(value);
+    } else if (!dropped.includes(value)) {
+      dropped.push(value);
+    }
+  }
+  return { kept: PERMISSIONS.filter((p) => present.has(p)), dropped };
 }
