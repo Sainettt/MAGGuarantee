@@ -118,7 +118,8 @@
       "liderIdNoOptions": "No active planner leads — first give the “Lead” flag to one of the planners.",
       "liderIdStaleNotLider": "{name} (no longer a lead)",
       "liderIdStaleInactive": "{name} (inactive)",
-      "liderIdStaleHint": "The selected supervisor is not an active lead — this planner's requests are decided by an administrator. Choose another lead."
+      "liderIdStaleHint": "The selected supervisor is not an active lead — this planner's requests are decided by an administrator. Choose another lead.",
+      "carrierLocked": "Locked — a carrier account has a fixed role and is managed locally."
     },
     "actions": {
       "resetPassword": "Reset password…",
@@ -153,7 +154,50 @@
     "errors": {
       "liderRequiresLiderRole": "The lead flag can only be given to these roles: {roles}.",
       "liderManagedByMagspace": "This account’s lead flag comes from the MAGSpace position mapping. Set a hand-granted role or switch the account to local management.",
-      "liderIdInvalid": "The supervisor must be an active planner with the “Lead” flag, other than this user."
+      "liderIdInvalid": "The supervisor must be an active planner with the “Lead” flag, other than this user.",
+      "carrierRoleLocked": "A carrier's role can't be changed — the account is bound to the carrier company. Reload the form and try again."
+    },
+    "permissions": {
+      "title": "Individual permissions",
+      "description": "Exceptions to the role for this account. The role still decides the panel and the data scope.",
+      "magspaceHint": "MAGSpace sync doesn't change these settings. If it changes the account's role, exceptions that no longer fit are removed.",
+      "empty": "No exceptions — the account has exactly the {role} role's permissions.",
+      "extra": {
+        "title": "Added",
+        "hint": "Permissions on top of the {role} role.",
+        "autoAdded": "Also ticked: {list} — it's required.",
+        "autoRemoved": "Also cleared: {list} — it doesn't work without the cleared permission."
+      },
+      "denied": {
+        "title": "Removed",
+        "hint": "Tick the role permissions this user should not have.",
+        "summary": "{count, plural, =0 {Nothing removed} one {# permission removed} other {# permissions removed}}",
+        "toggleShow": "Show role permissions ({count})",
+        "toggleHide": "Hide role permissions",
+        "dependentsHint": "Without it, these won't work: {list}.",
+        "dependentsApply": "Remove these too"
+      },
+      "effective": {
+        "title": "Effective permissions",
+        "hint": "After saving: role + added − removed.",
+        "count": "{count, plural, one {# permission} other {# permissions}}",
+        "extraAria": "added",
+        "none": "No permissions — the user will see an empty panel."
+      },
+      "drop": {
+        "title": "Will be removed on save — they don't fit the new role:",
+        "extraTag": "added",
+        "deniedTag": "removed"
+      },
+      "auditNote": "Takes effect from the user's next action and is recorded in the audit log.",
+      "listMarkerAria": "Individual permissions: {extra} added, {denied} removed",
+      "errors": {
+        "notGrantable": "These permissions can't be granted to the {role} role: {list}. Reload the form and try again.",
+        "notGrantableGeneric": "Some permissions can't be granted to the {role} role. Reload the form and try again.",
+        "notRevocable": "These permissions can't be removed from the {role} role: {list}.",
+        "notRevocableGeneric": "Some permissions can't be removed from the {role} role.",
+        "adminCannotBeDenied": "An administrator's permissions can't be removed. Reload the form and try again."
+      }
     }
   },
   "forms": {
@@ -303,6 +347,117 @@
       "opiekun": "DAF lead",
       "pracownik": "Employees lead",
       "eksport": "Export lead"
+    }
+  },
+  "permissions": {
+    "liderSuffix": "(lead)",
+    "groups": {
+      "claims": "Claims",
+      "carriers": "Carriers",
+      "fleet": "Fleet",
+      "delegations": "Trips and mileage",
+      "panels": "Panels",
+      "integrations": "Lookups and integrations",
+      "administration": "Administration"
+    },
+    "labels": {
+      "claims": {
+        "read": "View claims",
+        "submit": "Submit claims",
+        "verify": "Verify claims",
+        "verify_pending_authorization": "Verify claims awaiting authorisation"
+      },
+      "dashboard": {
+        "read": "View dashboard"
+      },
+      "carriers": {
+        "read": "View carriers",
+        "write": "Edit carriers",
+        "delete": "Delete carriers"
+      },
+      "carrier_documents": {
+        "read": "View company and fleet documents",
+        "add": "Upload company documents",
+        "delete": "Delete company documents"
+      },
+      "vehicles": {
+        "read": "View vehicles",
+        "rates": {
+          "read": "View vehicle rates"
+        },
+        "fuel_card": {
+          "read": "View fuel card"
+        },
+        "planner_transfer": {
+          "request": "Request vehicle transfers",
+          "decide": "Decide on vehicle transfers"
+        },
+        "planner_history": {
+          "read": "View vehicle planner history"
+        }
+      },
+      "drivers": {
+        "read": "View drivers"
+      },
+      "trailers": {
+        "read": "View trailers"
+      },
+      "fleet": {
+        "write": "Edit fleet (vehicles, drivers, trailers)",
+        "hard_delete": "Permanently delete drivers and trailers"
+      },
+      "gps": {
+        "read": "View GPS positions",
+        "refresh": "Refresh GPS positions"
+      },
+      "delegations": {
+        "read": "View trips",
+        "create": "Report trips",
+        "cancel": "Cancel trips",
+        "mark_ready": "Mark trips as loaded",
+        "transit": "Mark trips in transit and returned"
+      },
+      "km": {
+        "read": "View mileage",
+        "verify": "Verify daily mileage"
+      },
+      "panel": {
+        "opiekun": "Carrier-success manager panel",
+        "planista": "Planner panel",
+        "dyspozytor": "Dispatcher panel",
+        "carrier": "Carrier panel"
+      },
+      "lookups": {
+        "staff": "Pick staff from a list",
+        "carriers": "Pick carriers from a list"
+      },
+      "integrations": {
+        "external": "Check the VIES and White List registers"
+      },
+      "bugbot": {
+        "submit_idea": "Suggest ideas"
+      },
+      "users": {
+        "manage": "Manage users"
+      },
+      "sso": {
+        "manage": "Manage Google sign-in"
+      },
+      "teams": {
+        "manage": "Manage leading teams"
+      },
+      "trailer_types": {
+        "manage": "Manage trailer types"
+      },
+      "limits": {
+        "manage": "Manage km guarantee limits"
+      },
+      "audit": {
+        "read": "View audit log"
+      },
+      "diagnostics": {
+        "manage": "Manage diagnostics"
+      }
     }
   },
   "landing": {
@@ -1621,6 +1776,9 @@
         "manageInTrailer": "Managed in the trailer window.",
         "manageInDriver": "Managed in the driver window.",
         "uploadHint": "Upload a document for this category.",
+        "uploadHintAddOnly": "You can add a new file. Added files can't be deleted or replaced — if you make a mistake, contact your manager.",
+        "companyByOpiekun": "Your manager adds company documents.",
+        "fleetByOpiekun": "Your manager keeps fleet documents up to date.",
         "openAria": "Open list: {type}"
       },
       "empty": {
@@ -1775,7 +1933,13 @@
       "newClaim": "New",
       "fleet": "Fleet",
       "delegations": "Trips",
-      "porozumienie": "Agreement"
+      "porozumienie": "Agreement",
+      "documents": "Documents"
+    },
+    "documents": {
+      "title": "Documents",
+      "subtitleAdd": "Your company and fleet documents. You can add new files to company documents.",
+      "subtitleRead": "Your company and fleet documents — view only."
     },
     "fleetTabs": {
       "ariaLabel": "Fleet sections",

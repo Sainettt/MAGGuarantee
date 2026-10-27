@@ -297,7 +297,7 @@ MAGSpace с переименованным полем. Отмена + письм
 `UsersRepository.listByRole('admin')`, per-admin `allSettled`.
 
 **Аудит** (`AuditWriter`, `actor: 'system'` ⇒ обязателен префикс `system.`):
-`system.syncUserFromDirectory`, `system.deprovisionUserFromDirectory`
+`system.syncUserFromDirectory`, `system.deprovisionUserFromDirectory`, `system.pruneUserPermissions` (с 2026-10-27, docs/25 B6: при смене роли или флага лидера из справочника обрезаются точечные права, которые больше не подходят новой роли, before/after в строке)
 (с `reason`), `system.abortDirectoryReconcile`. На пути логина — от лица
 входящего: `googleLogin`, `linkGoogleAccount`, `provisionUserFromDirectory`,
 `syncUserFromDirectory`; отказ — `system.denyDirectoryAccess`.

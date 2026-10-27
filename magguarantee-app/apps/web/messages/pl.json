@@ -118,7 +118,8 @@
       "liderIdNoOptions": "Brak aktywnych liderów planistów — najpierw nadaj flagę „Lider” jednemu z planistów.",
       "liderIdStaleNotLider": "{name} (nie jest już liderem)",
       "liderIdStaleInactive": "{name} (nieaktywny)",
-      "liderIdStaleHint": "Wybrany przełożony nie jest aktywnym liderem — wnioski tego planisty rozpatruje administrator. Wybierz innego lidera."
+      "liderIdStaleHint": "Wybrany przełożony nie jest aktywnym liderem — wnioski tego planisty rozpatruje administrator. Wybierz innego lidera.",
+      "carrierLocked": "Zablokowane — konto przewoźnika ma stałą rolę i jest zarządzane lokalnie."
     },
     "actions": {
       "resetPassword": "Zresetuj hasło…",
@@ -153,7 +154,50 @@
     "errors": {
       "liderRequiresLiderRole": "Flagę lidera można nadać tylko rolom: {roles}.",
       "liderManagedByMagspace": "Flaga lidera tego konta pochodzi z mapowania stanowiska w MAGSpace. Ustaw „Rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne.",
-      "liderIdInvalid": "Przełożonym może być tylko aktywny planista z flagą „Lider”, inny niż ten użytkownik."
+      "liderIdInvalid": "Przełożonym może być tylko aktywny planista z flagą „Lider”, inny niż ten użytkownik.",
+      "carrierRoleLocked": "Roli przewoźnika nie można zmienić — konto jest powiązane z firmą przewoźnika. Odśwież formularz i spróbuj ponownie."
+    },
+    "permissions": {
+      "title": "Uprawnienia indywidualne",
+      "description": "Wyjątki od roli dla tego konta. Rola nadal decyduje o panelu i zakresie danych.",
+      "magspaceHint": "Synchronizacja z MAGSpace nie zmienia tych ustawień. Jeśli zmieni rolę konta, niepasujące wyjątki zostaną usunięte.",
+      "empty": "Brak wyjątków — konto ma dokładnie uprawnienia roli {role}.",
+      "extra": {
+        "title": "Dodatkowe",
+        "hint": "Uprawnienia ponad rolę {role}.",
+        "autoAdded": "Zaznaczono również: {list} — jest wymagane.",
+        "autoRemoved": "Odznaczono również: {list} — bez odznaczonego uprawnienia nie działa."
+      },
+      "denied": {
+        "title": "Odebrane",
+        "hint": "Zaznacz uprawnienia roli, których ten użytkownik ma nie mieć.",
+        "summary": "{count, plural, =0 {Nic nie odebrano} one {Odebrano # uprawnienie} few {Odebrano # uprawnienia} many {Odebrano # uprawnień} other {Odebrano # uprawnienia}}",
+        "toggleShow": "Pokaż uprawnienia roli ({count})",
+        "toggleHide": "Ukryj uprawnienia roli",
+        "dependentsHint": "Bez tego uprawnienia nie zadziała: {list}.",
+        "dependentsApply": "Odbierz również"
+      },
+      "effective": {
+        "title": "Uprawnienia efektywne",
+        "hint": "Tak będzie po zapisaniu: rola + dodatkowe − odebrane.",
+        "count": "{count, plural, one {# uprawnienie} few {# uprawnienia} many {# uprawnień} other {# uprawnienia}}",
+        "extraAria": "dodatkowe",
+        "none": "Brak uprawnień — użytkownik zobaczy pusty panel."
+      },
+      "drop": {
+        "title": "Po zapisaniu zostaną usunięte — nie pasują do nowej roli:",
+        "extraTag": "dodatkowe",
+        "deniedTag": "odebrane"
+      },
+      "auditNote": "Zmiana działa od następnej akcji użytkownika i trafia do audytu.",
+      "listMarkerAria": "Uprawnienia indywidualne: dodatkowe {extra}, odebrane {denied}",
+      "errors": {
+        "notGrantable": "Tych uprawnień nie można nadać roli {role}: {list}. Odśwież formularz i spróbuj ponownie.",
+        "notGrantableGeneric": "Część uprawnień nie może być nadana roli {role}. Odśwież formularz i spróbuj ponownie.",
+        "notRevocable": "Tych uprawnień nie można odebrać roli {role}: {list}.",
+        "notRevocableGeneric": "Części uprawnień nie można odebrać roli {role}.",
+        "adminCannotBeDenied": "Administratorowi nie można odebrać uprawnień. Odśwież formularz i spróbuj ponownie."
+      }
     }
   },
   "forms": {
@@ -303,6 +347,117 @@
       "opiekun": "Lider DAF",
       "pracownik": "Lider pracowników",
       "eksport": "Lider eksportu"
+    }
+  },
+  "permissions": {
+    "liderSuffix": "(lider)",
+    "groups": {
+      "claims": "Wnioski",
+      "carriers": "Przewoźnicy",
+      "fleet": "Flota",
+      "delegations": "Wyjazdy i przebieg",
+      "panels": "Panele",
+      "integrations": "Słowniki i integracje",
+      "administration": "Administracja"
+    },
+    "labels": {
+      "claims": {
+        "read": "Podgląd wniosków",
+        "submit": "Składanie wniosków",
+        "verify": "Weryfikacja wniosków",
+        "verify_pending_authorization": "Weryfikacja wniosków czekających na autoryzację"
+      },
+      "dashboard": {
+        "read": "Podgląd pulpitu"
+      },
+      "carriers": {
+        "read": "Podgląd przewoźników",
+        "write": "Edycja przewoźników",
+        "delete": "Usuwanie przewoźników"
+      },
+      "carrier_documents": {
+        "read": "Podgląd dokumentów firmy i floty",
+        "add": "Dodawanie dokumentów firmy",
+        "delete": "Usuwanie dokumentów firmy"
+      },
+      "vehicles": {
+        "read": "Podgląd ciągników",
+        "rates": {
+          "read": "Podgląd stawek ciągnika"
+        },
+        "fuel_card": {
+          "read": "Podgląd karty paliwowej"
+        },
+        "planner_transfer": {
+          "request": "Zgłaszanie przekazań ciągników",
+          "decide": "Decydowanie o przekazaniach ciągników"
+        },
+        "planner_history": {
+          "read": "Podgląd historii planistów ciągnika"
+        }
+      },
+      "drivers": {
+        "read": "Podgląd kierowców"
+      },
+      "trailers": {
+        "read": "Podgląd naczep"
+      },
+      "fleet": {
+        "write": "Edycja floty (ciągniki, kierowcy, naczepy)",
+        "hard_delete": "Trwałe usuwanie kierowców i naczep"
+      },
+      "gps": {
+        "read": "Podgląd pozycji GPS",
+        "refresh": "Odświeżanie pozycji GPS"
+      },
+      "delegations": {
+        "read": "Podgląd wyjazdów",
+        "create": "Zgłaszanie wyjazdów",
+        "cancel": "Anulowanie wyjazdów",
+        "mark_ready": "Oznaczanie wyjazdów jako załadowane",
+        "transit": "Oznaczanie wyjazdów w trasie i zjazdów"
+      },
+      "km": {
+        "read": "Podgląd przebiegu",
+        "verify": "Weryfikacja przebiegu dziennego"
+      },
+      "panel": {
+        "opiekun": "Panel opiekuna",
+        "planista": "Panel planisty",
+        "dyspozytor": "Panel dyspozytora",
+        "carrier": "Panel przewoźnika"
+      },
+      "lookups": {
+        "staff": "Wybór pracowników z listy",
+        "carriers": "Wybór przewoźników z listy"
+      },
+      "integrations": {
+        "external": "Sprawdzanie w rejestrach VIES i Biała Lista"
+      },
+      "bugbot": {
+        "submit_idea": "Zgłaszanie pomysłów"
+      },
+      "users": {
+        "manage": "Zarządzanie użytkownikami"
+      },
+      "sso": {
+        "manage": "Zarządzanie logowaniem Google"
+      },
+      "teams": {
+        "manage": "Zarządzanie zespołami prowadzącymi"
+      },
+      "trailer_types": {
+        "manage": "Zarządzanie typami naczep"
+      },
+      "limits": {
+        "manage": "Zarządzanie limitami gwarancji km"
+      },
+      "audit": {
+        "read": "Podgląd dziennika audytu"
+      },
+      "diagnostics": {
+        "manage": "Zarządzanie diagnostyką"
+      }
     }
   },
   "landing": {
@@ -1621,6 +1776,9 @@
         "manageInTrailer": "Zarządzaj w oknie naczepy.",
         "manageInDriver": "Zarządzaj w oknie kierowcy.",
         "uploadHint": "Prześlij dokument dla tej kategorii.",
+        "uploadHintAddOnly": "Możesz dodać nowy plik. Dodanego pliku nie można usunąć ani zastąpić — w razie pomyłki skontaktuj się ze swoim opiekunem.",
+        "companyByOpiekun": "Dokumenty firmy dodaje Twój opiekun.",
+        "fleetByOpiekun": "Dokumenty floty uzupełnia Twój opiekun.",
         "openAria": "Otwórz listę: {type}"
       },
       "empty": {
@@ -1775,7 +1933,13 @@
       "newClaim": "Nowy",
       "fleet": "Flota",
       "delegations": "Wyjazdy",
-      "porozumienie": "Porozumienie"
+      "porozumienie": "Porozumienie",
+      "documents": "Dokumenty"
+    },
+    "documents": {
+      "title": "Dokumenty",
+      "subtitleAdd": "Dokumenty Twojej firmy i floty. Do dokumentów firmy możesz dodawać nowe pliki.",
+      "subtitleRead": "Dokumenty Twojej firmy i floty — tylko do podglądu."
     },
     "fleetTabs": {
       "ariaLabel": "Sekcje floty",

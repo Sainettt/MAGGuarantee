@@ -1,7 +1,9 @@
 'use client';
 
-// "Dokumenty" tab on the opieka carrier drill-down (docs/14-design-system.md
-// §Phase 5-rework, §5R.0–5R.10). It is a fleet-wide document-TYPE catalog: five
+// "Dokumenty" tab — shared by the opieka carrier drill-down
+// (`/employee/opieka/carriers/[login]`) and the carrier's own
+// `/carrier/dokumenty` (docs/14-design-system.md §Phase 5-rework, §5R.0–5R.10;
+// «Carrier „Dokumenty” tab» B.1–B.9). It is a fleet-wide document-TYPE catalog: five
 // fixed groups (company / vehicles / adrVehicles / trailers / drivers) of
 // <DocumentTypeCard>s; clicking a card opens a right-side <Sheet> with a file
 // <DataTable> (owning-entity label · fileName · size · createdAt · download).
@@ -22,6 +24,13 @@
 // Download: every endpoint is authenticated (not a public URL), so we fetch the
 // bytes through the auth/refresh-aware client and trigger a save via a throwaway
 // object-URL anchor. Delete (company only): confirmed in a <Dialog> then DELETEd.
+//
+// Controls by PERMISSION (docs/25 §3 B6, docs/14 B.1 / B.4 — never by role):
+// the upload footer ⇔ `carrier_documents.add`, «Usuń» + its confirm ⇔
+// `carrier_documents.delete`, the «Zarządzaj w oknie …» pointer ⇔ `fleet.write`
+// (`./carrierDocumentsAccess.ts`). Opiekun and admin hold all three, so their
+// render is the pre-B6 one; a carrier with the per-user grant gets the
+// view-only / upload-only variant.
 
 import {
   ChevronRight,
@@ -77,7 +86,10 @@ import {
   useDeleteCarrierAttachment,
   useUploadCarrierAttachment,
 } from '@/lib/hooks/useCarriers';
+import { useCan } from '@/lib/hooks/useCan';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
+
+import { carrierDocumentsUi, type CarrierDocumentsUi } from './carrierDocumentsAccess';
 
 // ─── Model ────────────────────────────────────────────────
 //
@@ -141,6 +153,14 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
   const overviewQ = useCarrierDocumentsOverview(carrierId);
   const data = overviewQ.data;
   const fileLabels = useFileLabels(tFile);
+
+  const canAdd = useCan('carrier_documents.add');
+  const canDelete = useCan('carrier_documents.delete');
+  const canManageFleet = useCan('fleet.write');
+  const ui = useMemo(
+    () => carrierDocumentsUi({ canAdd, canDelete, canManageFleet }),
+    [canAdd, canDelete, canManageFleet],
+  );
 
   // Which type-card's Sheet is open. Null = closed.
   const [openTypeKey, setOpenTypeKey] = useState<string | null>(null);
@@ -208,6 +228,7 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
         t={t}
         tCommon={tCommon}
         fileLabels={fileLabels}
+        ui={ui}
       />
     </div>
   );
@@ -326,6 +347,8 @@ interface DocumentTypeSheetProps {
   t: ReturnType<typeof useTranslations>;
   tCommon: ReturnType<typeof useTranslations>;
   fileLabels: FileUploadLabels;
+  /** Which controls the viewer's rights allow (B.4). */
+  ui: CarrierDocumentsUi;
 }
 
 function DocumentTypeSheet({
@@ -336,6 +359,7 @@ function DocumentTypeSheet({
   t,
   tCommon,
   fileLabels,
+  ui,
 }: DocumentTypeSheetProps) {
   // ── Download — fetch authenticated bytes, save via object-URL anchor ──
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -487,6 +511,8 @@ function DocumentTypeSheet({
               type="button"
               variant="ghost"
               size="sm"
+              // B.7 — icon-only below `lg`: a 44px touch target on phones.
+              className="max-sm:min-h-11 max-sm:min-w-11"
               disabled={downloadingId === row.id}
               aria-busy={downloadingId === row.id}
               aria-label={`${t('download')} — ${row.fileName}`}
@@ -499,7 +525,7 @@ function DocumentTypeSheet({
               )}
               <span className="hidden lg:inline">{t('download')}</span>
             </Button>
-            {type?.managed && (
+            {type?.managed && ui.showDelete && (
               <Button
                 type="button"
                 variant="ghost"
@@ -516,17 +542,20 @@ function DocumentTypeSheet({
       },
     );
     return cols;
-  }, [type, entityHeader, t, tCommon, downloadingId, handleDownload]);
+  }, [type, entityHeader, t, tCommon, downloadingId, handleDownload, ui.showDelete]);
 
-  // Manage-elsewhere pointer for download-only types.
+  // Pointer for download-only (fleet) types: where they are managed — or, for
+  // a viewer without `fleet.write` (a carrier), who keeps them up to date.
   const managePointer =
-    type?.entityKind === 'vehicle'
-      ? t('sheet.manageInVehicle')
-      : type?.entityKind === 'trailer'
-        ? t('sheet.manageInTrailer')
-        : type?.entityKind === 'driver'
-          ? t('sheet.manageInDriver')
-          : null;
+    !type || type.entityKind === 'company'
+      ? null
+      : ui.fleetFooter === 'byOpiekun'
+        ? t('sheet.fleetByOpiekun')
+        : type.entityKind === 'vehicle'
+          ? t('sheet.manageInVehicle')
+          : type.entityKind === 'trailer'
+            ? t('sheet.manageInTrailer')
+            : t('sheet.manageInDriver');
 
   return (
     <>
@@ -557,10 +586,14 @@ function DocumentTypeSheet({
             />
           </SheetBody>
 
-          {type?.managed ? (
+          {type?.managed && ui.companyFooter === 'byOpiekun' ? (
+            <SheetFooter className="justify-start">
+              <p className="text-xs text-text-sub">{t('sheet.companyByOpiekun')}</p>
+            </SheetFooter>
+          ) : type?.managed ? (
             <SheetFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:justify-end">
               <div className="min-w-0 flex-1 space-y-1.5">
-                <p className="text-xs text-text-sub">{t('sheet.uploadHint')}</p>
+                <p className="text-xs text-text-sub">{t(ui.uploadHintKey)}</p>
                 <FileUpload
                   value={picked}
                   onChange={setPicked}
@@ -589,43 +622,45 @@ function DocumentTypeSheet({
         </SheetContent>
       </Sheet>
 
-      {/* Delete confirmation (company types only). */}
-      <Dialog
-        open={deleteTarget !== null}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('deleteTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('deleteBody', { fileName: deleteTarget?.fileName ?? '' })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleteM.isPending}
-            >
-              {tCommon('cancel')}
-            </Button>
-            {/* Brand-red default IS the danger affordance here (§ConfirmDelete). */}
-            <Button
-              type="button"
-              size="sm"
-              disabled={deleteM.isPending}
-              onClick={() => {
-                if (!deleteTarget) return;
-                deleteM.mutate({ carrierId, attachmentId: deleteTarget.id });
-              }}
-            >
-              {deleteM.isPending ? tCommon('saving') : tCommon('delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete confirmation (company types only; mounted only with `.delete`). */}
+      {ui.showDelete && (
+        <Dialog
+          open={deleteTarget !== null}
+          onOpenChange={(o) => !o && setDeleteTarget(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('deleteTitle')}</DialogTitle>
+              <DialogDescription>
+                {t('deleteBody', { fileName: deleteTarget?.fileName ?? '' })}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleteM.isPending}
+              >
+                {tCommon('cancel')}
+              </Button>
+              {/* Brand-red default IS the danger affordance here (§ConfirmDelete). */}
+              <Button
+                type="button"
+                size="sm"
+                disabled={deleteM.isPending}
+                onClick={() => {
+                  if (!deleteTarget) return;
+                  deleteM.mutate({ carrierId, attachmentId: deleteTarget.id });
+                }}
+              >
+                {deleteM.isPending ? tCommon('saving') : tCommon('delete')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

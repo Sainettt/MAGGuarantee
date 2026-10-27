@@ -240,6 +240,29 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
   },
 ];
 
+/** The in-shell «Brak dostępu» page (mirrors `EMPLOYEE_FORBIDDEN_PATH` of `lib/auth/server.ts`). */
+const EMPLOYEE_FORBIDDEN = '/employee/forbidden';
+
+/**
+ * Where `/employee` sends a signed-in employee — and with it every «landing»
+ * redirect of the shell's pages (`requirePermission(…, { onDenied: 'landing' })`
+ * → `landingFor(role)` = `/employee`): the FIRST nav entry he can see.
+ *
+ * For the role sets this is what the root always did — admin / pracownik →
+ * Dashboard, opiekun → Moja opieka (`navLanding.test.ts` pins it). With
+ * per-user revocations (docs/25 B6) a fixed target could loop: a pracownik
+ * whose `dashboard.read` was revoked would bounce `/employee/dashboard` →
+ * `/employee` → `/employee/dashboard`. The first visible entry is one he holds
+ * the right for, so its page never sends him back; with no entry left he gets
+ * the «Brak dostępu» page inside the shell.
+ */
+export function employeeLandingPath(
+  permissions: readonly Permission[],
+  role: Role,
+): string {
+  return filterNav(permissions, role)[0]?.href ?? EMPLOYEE_FORBIDDEN;
+}
+
 /**
  * The subset of EMPLOYEE_NAV visible to a user with these EFFECTIVE
  * `permissions` (`effectivePermissionsOf(user)`) and this `role` (used only

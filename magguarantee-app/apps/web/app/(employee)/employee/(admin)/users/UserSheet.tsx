@@ -25,10 +25,23 @@
 // (the directory never sets it), sent on PATCH only when changed. A stale
 // stored link (the target lost the flag / is inactive — U10) stays an option,
 // marked, with a warning — see lib/users/liderSelect.ts.
+//
+// Per-user permissions (docs/25 §3 B6, docs/14 A.1–A.15): edit mode ends with
+// <UserPermissionsBlock>. The form keeps the FULL `extraPermissions` /
+// `deniedPermissions` lists; the PATCH carries the part the final `(role,
+// lider)` admits, and each list only when it differs from the stored one. The
+// four B6 refusals (422) are shown under their group / the role field, never
+// as a toast.
+//
+// Carrier rows (A.8): the role is bound to the Carrier row — the access
+// fields render as a read-only <dl> under one <LockNotice>, and the PATCH
+// never carries `role` / `lider` / `liderId` / `managedBy` / `roleOverride`
+// (the form used to coerce `przewoznik` to `pracownik` and send it; the api
+// now answers that with 422 USER_CARRIER_ROLE_LOCKED).
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -37,6 +50,7 @@ import {
   AssignableRole,
   CreateUserSchema,
   LIDER_ROLES,
+  RoleSchema,
   UpdateUserSchema,
   refineLiderPair,
   type CreateUserDto,
@@ -48,6 +62,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
+import { LockNotice } from '@/components/ui/LockNotice';
 import { Select } from '@/components/ui/Select';
 import {
   Sheet,
@@ -60,9 +75,12 @@ import {
 } from '@/components/ui/Sheet';
 import { FormField, FormMessage } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
+import { permissionLabelKey } from '@/lib/auth/permissionGroups';
+import type { Permission } from '@/lib/auth/permissions';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { usePlannerLiders } from '@/lib/hooks/useLookups';
 import { useCreateUser, useUpdateUser } from '@/lib/hooks/useUsers';
+import { isCarrierAccount, omitCarrierLockedFields } from '@/lib/users/carrierAccount';
 import {
   liderAfterRoleOverrideChange,
   liderCheckboxState,
@@ -71,11 +89,25 @@ import {
 } from '@/lib/users/liderCheckboxState';
 import { liderErrorKind } from '@/lib/users/liderErrors';
 import {
+  permissionErrorField,
+  permissionErrorMessageKey,
+  permissionOverrideError,
+  type PermissionOverrideError,
+} from '@/lib/users/permissionErrors';
+import {
+  droppedOnRoleChange,
+  overridesPatch,
+  overridesRole,
+  type OverridesState,
+} from '@/lib/users/permissionOverrides';
+import {
   liderIdCreateValue,
   liderIdPatchValue,
   liderSelectModel,
   showsLiderField,
 } from '@/lib/users/liderSelect';
+
+import { UserPermissionsBlock, type PermissionGroupField } from './UserPermissionsBlock';
 
 // Roles the UI offers in the dropdown — przewoznik is excluded because
 // carrier users are provisioned via POST /carriers (the API would reject it
@@ -89,7 +121,6 @@ const SELECTABLE_ROLES = [
   'eksport',
   'weryfikator',
 ] as const;
-type SelectableRole = (typeof SELECTABLE_ROLES)[number];
 
 // Form-state shape carries every possible field; we slice into the right
 // CreateUserDto / UpdateUserDto in onSubmit. `password` and `login` only
@@ -98,7 +129,12 @@ interface UserFormValues {
   login: string;
   name: string;
   email: string;
-  role: SelectableRole;
+  /**
+   * One of `SELECTABLE_ROLES` — or `przewoznik` on a carrier row, which keeps
+   * its stored role (A.8): the select is not rendered there and the PATCH
+   * never carries it.
+   */
+  role: Role;
   password?: string;
   /**
    * The planista's leader (docs/29 U9) — `''` = none («brak», an admin
@@ -113,6 +149,10 @@ interface UserFormValues {
   managedBy: 'local' | 'magspace';
   /** `''` = no override, i.e. the stanowisko mapping decides the role. */
   roleOverride: '' | AssignableRole;
+  // ── Per-user permissions (docs/25 §3 B6) — edit only ───
+  /** FULL lists, incl. entries the current role does not admit (A.7). */
+  extraPermissions: Permission[];
+  deniedPermissions: Permission[];
 }
 
 const EMPTY_DEFAULTS: UserFormValues = {
@@ -128,6 +168,8 @@ const EMPTY_DEFAULTS: UserFormValues = {
   // the directory afterwards.
   managedBy: 'local',
   roleOverride: '',
+  extraPermissions: [],
+  deniedPermissions: [],
 };
 
 /**
@@ -136,8 +178,12 @@ const EMPTY_DEFAULTS: UserFormValues = {
  * or `null` — validating the raw form values against it rejected `''` and
  * blocked EVERY edit of a user without an override. The API contract stays
  * strict; only the form accepts `''`, and `onSubmit` maps it to `null`.
+ *
+ * `role` accepts every role for the same reason: a carrier row keeps
+ * `przewoznik` in the form (A.8), and `onSubmit` never sends it.
  */
 const EditFormSchema = UpdateUserSchema.extend({
+  role: RoleSchema.optional(),
   roleOverride: AssignableRole.or(z.literal('')).nullable().optional(),
 }).passthrough();
 
@@ -172,7 +218,10 @@ export function UserSheet({ open, user, onClose }: Props) {
   const t = useTranslations('users');
   const tCommon = useTranslations('common');
   const tRoles = useTranslations('roles');
+  const tPerm = useTranslations('permissions');
+  const locale = useLocale();
   const isEdit = user !== null;
+  const isCarrierRow = isEdit && isCarrierAccount(user);
 
   // Create schema includes login + optional password; update drops both and
   // requires nothing (PATCH). Both are .strict() — we slice the form values
@@ -194,9 +243,8 @@ export function UserSheet({ open, user, onClose }: Props) {
         login: user.login,
         name: user.name ?? '',
         email: user.email,
-        role: (user.role === 'przewoznik'
-          ? 'pracownik'
-          : user.role) as SelectableRole,
+        // The stored role as is — a carrier keeps `przewoznik` (A.8).
+        role: user.role,
         password: '',
         liderId: user.liderId ?? '',
         active: user.active,
@@ -205,6 +253,9 @@ export function UserSheet({ open, user, onClose }: Props) {
         lider: user.lider,
         managedBy: user.managedBy,
         roleOverride: user.roleOverride ?? '',
+        // `?? []`: an api that predates B6 does not send the lists.
+        extraPermissions: [...(user.extraPermissions ?? [])],
+        deniedPermissions: [...(user.deniedPermissions ?? [])],
       });
     } else {
       form.reset(EMPTY_DEFAULTS);
@@ -228,8 +279,35 @@ export function UserSheet({ open, user, onClose }: Props) {
     }
   };
 
-  /** 422 USER_LIDER_ID_INVALID goes under its field (§17.7); the rest toast. */
+  // `{list}` of a B6 refusal: the labels of the refused ids (A.9, A.13).
+  const listFormat = useMemo(
+    () => new Intl.ListFormat(locale, { type: 'conjunction' }),
+    [locale],
+  );
+  const permissionErrorMessage = (error: PermissionOverrideError): string =>
+    t(permissionErrorMessageKey(error), {
+      role: tRoles(
+        overridesRole({
+          role: form.getValues('role'),
+          managedBy: form.getValues('managedBy'),
+          roleOverride: form.getValues('roleOverride'),
+        }),
+      ),
+      list: listFormat.format(error.permissions.map((p) => tPerm(permissionLabelKey(p)))),
+    });
+
+  /**
+   * 422 USER_LIDER_ID_INVALID goes under its field (§17.7), the B6 refusals
+   * under their permission group / the role (A.9); the rest toast.
+   */
   const onMutationError = (err: unknown): void => {
+    const permissionError = permissionOverrideError(err);
+    if (permissionError) {
+      form.setError(permissionErrorField(permissionError.kind), {
+        message: permissionErrorMessage(permissionError),
+      });
+      return;
+    }
     if (liderErrorKind(err) === 'liderIdInvalid') {
       form.setError('liderId', { message: t('errors.liderIdInvalid') });
       return;
@@ -270,6 +348,9 @@ export function UserSheet({ open, user, onClose }: Props) {
       const cleaned: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(values)) {
         if (k === 'liderId') continue;
+        // Edit-only and sent by their own rule below (only when changed);
+        // `POST /users` is `.strict()` and would 400 on them.
+        if (k === 'extraPermissions' || k === 'deniedPermissions') continue;
         if (v === '' || v === undefined || v === null) continue;
         cleaned[k] = v;
       }
@@ -317,7 +398,32 @@ export function UserSheet({ open, user, onClose }: Props) {
           // override could be set but never removed.
           rest.roleOverride = null;
         }
-        updateM.mutate({ id: user.id, body: rest as UpdateUserDto });
+        // Per-user permissions (A.7): the part of the form's lists that the
+        // FINAL `(role, lider)` admits — `lider` as the api merges it — and
+        // each list only when it differs from the stored one.
+        const { kept } = droppedOnRoleChange(
+          overridesRole({
+            role: values.role,
+            managedBy: values.managedBy,
+            roleOverride: values.roleOverride,
+          }),
+          lider ?? user.lider,
+          {
+            extra: values.extraPermissions ?? [],
+            denied: values.deniedPermissions ?? [],
+          },
+        );
+        Object.assign(
+          rest,
+          overridesPatch(kept, {
+            extraPermissions: user.extraPermissions ?? [],
+            deniedPermissions: user.deniedPermissions ?? [],
+          }),
+        );
+        // A carrier row never sends its access fields (A.8, 422
+        // USER_CARRIER_ROLE_LOCKED otherwise).
+        const body = isCarrierRow ? omitCarrierLockedFields(rest) : rest;
+        updateM.mutate({ id: user.id, body: body as UpdateUserDto });
       } else {
         // Create slice — drop the edit-only directory fields. They live in
         // EMPTY_DEFAULTS (so `reset` has a value for them) even though their
@@ -396,6 +502,28 @@ export function UserSheet({ open, user, onClose }: Props) {
       }),
     [lidersQ.data, user],
   );
+  // ── «Uprawnienia indywidualne» (A.1–A.15) ────────────────────────────
+  // Computed for the role and leader flag the api will END with: the
+  // hand-granted role on a MAGSpace account (W16), `lider` as merged by
+  // `liderPatchValue` (an unchanged / mapping-owned flag keeps the stored one).
+  const watchedLider = form.watch('lider');
+  const watchedExtra = form.watch('extraPermissions');
+  const watchedDenied = form.watch('deniedPermissions');
+  const overridesBlockRole = overridesRole({
+    role: watchedRole,
+    managedBy: watchedManagedBy,
+    roleOverride: watchedRoleOverride,
+  });
+  const overridesBlockLider =
+    isEdit && user
+      ? (liderPatchValue(liderState, watchedLider, user.lider) ?? user.lider)
+      : watchedLider;
+  const onOverridesChange = (next: OverridesState, group: PermissionGroupField) => {
+    form.setValue('extraPermissions', next.extra, { shouldDirty: true });
+    form.setValue('deniedPermissions', next.denied, { shouldDirty: true });
+    form.clearErrors(group === 'extra' ? 'extraPermissions' : 'deniedPermissions');
+  };
+
   const watchedLiderId = form.watch('liderId');
   const selectedLider = liderModel.options.find((o) => o.id === watchedLiderId);
   const selectedIsStale = Boolean(selectedLider?.stale);
@@ -465,39 +593,71 @@ export function UserSheet({ open, user, onClose }: Props) {
                 />
               </FormField>
 
-              <FormField
-                label={t('fields.role')}
-                required
-                description={
-                  isDirectoryManaged ? t('fields.managedHint') : undefined
-                }
-                error={errMsg('role')}
-                htmlFor="user-role"
-              >
-                <Select
-                  id="user-role"
-                  disabled={isDirectoryManaged}
-                  {...form.register('role', {
-                    // Any role change drops the leader flag (see header), and
-                    // the planista's leader when he stops being a planista.
-                    onChange: (e: { target: { value: string } }) => {
-                      form.setValue('lider', false);
-                      clearLiderIdUnlessPlanista(
-                        e.target.value as Role,
-                        form.getValues('roleOverride'),
-                      );
-                    },
-                  })}
+              {isCarrierRow && user ? (
+                // A.8 — one block-level lock (§6.5.13 tier B) instead of the
+                // role / lider / supervisor / management / hand-granted role
+                // fields: static values, no disabled selects.
+                <div className="space-y-2">
+                  <LockNotice id="user-carrier-locked">
+                    {t('fields.carrierLocked')}
+                  </LockNotice>
+                  <dl
+                    aria-describedby="user-carrier-locked"
+                    className="grid grid-cols-2 gap-x-4 gap-y-1"
+                  >
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+                        {t('fields.role')}
+                      </dt>
+                      <dd className="text-sm font-semibold text-text">
+                        {tRoles('przewoznik')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+                        {t('fields.managedBy')}
+                      </dt>
+                      <dd className="text-sm font-semibold text-text">
+                        {t(`fields.${user.managedBy}`)}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : (
+                <FormField
+                  label={t('fields.role')}
+                  required
+                  description={
+                    isDirectoryManaged ? t('fields.managedHint') : undefined
+                  }
+                  error={errMsg('role')}
+                  htmlFor="user-role"
                 >
-                  {SELECTABLE_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {tRoles(r)}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
+                  <Select
+                    id="user-role"
+                    disabled={isDirectoryManaged}
+                    {...form.register('role', {
+                      // Any role change drops the leader flag (see header), and
+                      // the planista's leader when he stops being a planista.
+                      onChange: (e: { target: { value: string } }) => {
+                        form.setValue('lider', false);
+                        clearLiderIdUnlessPlanista(
+                          e.target.value as Role,
+                          form.getValues('roleOverride'),
+                        );
+                      },
+                    })}
+                  >
+                    {SELECTABLE_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {tRoles(r)}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              )}
 
-              {liderState.mode !== 'hidden' && (
+              {!isCarrierRow && liderState.mode !== 'hidden' && (
                 // A single <label> wraps the checkbox (FormField's own label
                 // would name it twice); the hint is linked by id.
                 <div className="flex flex-col gap-1.5">
@@ -518,7 +678,7 @@ export function UserSheet({ open, user, onClose }: Props) {
                 </div>
               )}
 
-              {showLiderId && (
+              {!isCarrierRow && showLiderId && (
                 // §17.7 — right after the «Lider» flag block (where the old
                 // e-mail field was). Active on MAGSpace accounts too (U9).
                 <FormField
@@ -581,7 +741,7 @@ export function UserSheet({ open, user, onClose }: Props) {
                 {t('fields.active')}
               </label>
 
-              {isEdit && (
+              {isEdit && !isCarrierRow && (
                 <>
                   <FormField
                     label={t('fields.managedBy')}
@@ -648,6 +808,20 @@ export function UserSheet({ open, user, onClose }: Props) {
                     </FormField>
                   )}
                 </>
+              )}
+
+              {isEdit && user && (
+                <UserPermissionsBlock
+                  key={user.id}
+                  role={overridesBlockRole}
+                  lider={overridesBlockLider}
+                  managedBy={watchedManagedBy}
+                  value={{ extra: watchedExtra ?? [], denied: watchedDenied ?? [] }}
+                  onChange={onOverridesChange}
+                  initiallyExpanded={(user.deniedPermissions ?? []).length > 0}
+                  extraError={errMsg('extraPermissions')}
+                  deniedError={errMsg('deniedPermissions')}
+                />
               )}
             </div>
           </SheetBody>

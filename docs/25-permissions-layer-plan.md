@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1–B5 сделаны 2026-10-23 (B5: `3579226`); следующий — B6 (первый случай — §3 B6).** Коммиты этапов: B1 `2419bfc`; B2 `67f5a8b`…`94fbcff` + B2d; B3 `14f979a` (сервисные capability → `can()`, scope помечен `// scope:`); B4 `1cf8d89` (api `UserDto.permissions`) + `37e5dc3` (web); B5 `3579226` (deny by default, `@Roles` / `RolesGuard` удалены). Решения по открытым вопросам — §7. Детализирует §3 из
+> **Статус: B1–B5 сделаны 2026-10-23 (B5: `3579226`); B6 в работе с 2026-10-27 — шаг 1 миграция + спека UI `0883ee5`, шаг 2 shared + api `f4c0ef6`, шаг 3 web — в работе (первый случай — §3 B6).** Коммиты этапов: B1 `2419bfc`; B2 `67f5a8b`…`94fbcff` + B2d; B3 `14f979a` (сервисные capability → `can()`, scope помечен `// scope:`); B4 `1cf8d89` (api `UserDto.permissions`) + `37e5dc3` (web); B5 `3579226` (deny by default, `@Roles` / `RolesGuard` удалены). Решения по открытым вопросам — §7. Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -453,12 +453,12 @@ gps service / repository, vehicle-daily-km, bugbot controller и пять spec-�
 | Что | Решение |
 |---|---|
 | Хранение | `User.extraPermissions String[]` и `User.deniedPermissions String[]` (text[]); валидация Zod по `PERMISSIONS` на записи, неизвестные строки на чтении игнорируются с warn. **Нужны оба** (решение 2026-09-14): и добавить право сверх роли, и отозвать право у конкретного человека |
-| Вычисление | `JwtAccessStrategy.validate`: `(permissionsFor(role, lider) ∪ extraPermissions) − deniedPermissions` → `AuthUser.permissions` (`lider` — флаг лидера, docs/28). Отзыв побеждает добавление. Guard, сервисы и `/auth/me` не меняются |
+| Вычисление | `common/authz/effective-permissions.ts` (единственное место с B4) → shared `effectivePermissionsFor(role, lider, extra, denied)` = `(permissionsFor(role, lider) ∪ (extra ∩ GRANTABLE_EXTRA[role])) − denied` → `AuthUser.permissions` и `UserDto.permissions`. Отзыв побеждает добавление; фильтр с обеих сторон, поэтому пропущенная обрезка никогда не расширяет доступ. Guard, сервисы и форма `/auth/me` не меняются. *(2026-10-27: так и сделано)* |
 | Защита от «отзыв ломает поток» | Отзыв сам по себе безопасен для данных (доступ только сужается), но может оставить бессмысленный экран: например, `claims.verify` без `claims.read`. `DEPENDENT_PERMISSIONS` в shared — при отзыве базового права UI предупреждает и предлагает отозвать зависимые; API не падает, просто отвечает 403 |
 | Защита от «capability без scope» | `GRANTABLE_EXTRA: Partial<Record<Role, Permission[]>>` в shared — какие права можно добавить какой роли. Пример запрета: `planista` + `claims.verify` бессмысленно (нет ветки в scope wniosków). Нарушение → 422 на API и CHECK-подобная проверка в сервисе |
 | UI | `UserSheet`: блок «Uprawnienia indywidualne» — «Dodatkowe» (чекбоксы из `GRANTABLE_EXTRA[role]`) и «Odebrane» (чекбоксы из `permissionsFor(role)`). Для `managedBy = magspace` оба поля редактируемые: reconcile их не трогает |
-| Audit | `user.permissionsChanged` с before/after |
-| Edge | middleware не знает overrides → человек с extra-правом на admin-страницу получит bounce на edge. Решение в B6: для путей из `PATH_PERMISSIONS` edge пропускает запрос на layout (точная проверка там), а не отказывает |
+| Audit | Правки admin'а — существующий `updateUser` с before/after (поля теперь в `UserDtoFull`); обрезка системой при смене роли/лидера из справочника — `system.pruneUserPermissions` с before/after *(2026-10-27: вместо планировавшегося `user.permissionsChanged`, чтобы не ломать конвенцию имён действий)* |
+| Edge | middleware не знает overrides → человек с extra-правом на admin-страницу получил бы bounce на edge. *(2026-10-27, решение изменено)*: edge **не трогаем** — ни одно право из `GRANTABLE_EXTRA` сегодня не ведёт на префикс из `PATH_PERMISSIONS` (`/carrier/dokumenty` в edge-правилах нет, страница проверяет `requirePermission` на сервере по `/auth/me.permissions` с overrides). Tripwire-тест в web: если `GRANTABLE_EXTRA` когда-нибудь дотянется до edge-гейтируемого пути, тест краснеет и возвращает этот вопрос. Отозванное право сотрудника edge пропускает (он считает по роли), ловит `requirePermission`/`useCan` на странице |
 | Смена роли | extra-права, не входящие в `GRANTABLE_EXTRA[newRole]`, и denied-права, которых нет в `permissionsFor(newRole)`, сбрасываются с audit-строкой (как `roleOverride` при переходе в `local`, docs/24 §9 п.8) |
 
 Оценка B6: ≈ 2–2.5 дня (db + api + web + docs; отзыв добавляет UI и зависимости прав).

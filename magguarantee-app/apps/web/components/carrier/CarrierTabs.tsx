@@ -1,71 +1,28 @@
 'use client';
 
 // Phase 3 — top-level tab nav for the carrier shell. Per docs/14 § Phase 3
-// "Carrier shell": Wnioski / Nowy / Flota / Wyjazdy with emoji prefixes (per
-// project voice rules). `Flota` matches `/carrier/fleet/*` so the sub-tabs
-// inside fleet keep the parent active.
+// "Carrier shell": Wnioski / Nowy / Flota / Wyjazdy / Porozumienie / Przebieg
+// with emoji prefixes (per project voice rules), plus — last, only for a
+// carrier granted `carrier_documents.read` (docs/25 B6, docs/14 B.1 / B.2) —
+// «Dokumenty». `Flota` matches `/carrier/fleet/*` so the sub-tabs inside fleet
+// keep the parent active. The tab list lives in `./carrierTabsConfig.ts`.
+//
+// «Dokumenty» follows the EFFECTIVE permissions of `/auth/me` (per-user, so
+// the edge does not gate it): a grant or a revocation shows up at the next
+// `/auth/me` refresh; `/carrier/dokumenty` re-checks on the server.
 
 import { RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
+import { carrierDocumentsCarrierId } from '@/lib/auth/carrierDocuments';
 import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
+import { useAuth } from '@/lib/hooks/useAuth';
 import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { cn } from '@/lib/utils';
 
-interface Tab {
-  href: string;
-  /** Match `pathname.startsWith(matchPrefix)` for active state. */
-  matchPrefix: string;
-  emoji: string;
-  /** i18n key — `carrier.tabs.*` except `myKm` which reuses the `myKm.tab` key. */
-  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations' | 'porozumienie' | 'km';
-}
-
-const TABS: readonly Tab[] = [
-  {
-    href: '/carrier/claims',
-    matchPrefix: '/carrier/claims',
-    emoji: '📋',
-    labelKey: 'claims',
-  },
-  {
-    href: '/carrier/claims/new',
-    matchPrefix: '/carrier/claims/new',
-    emoji: '➕',
-    labelKey: 'newClaim',
-  },
-  {
-    href: '/carrier/fleet',
-    matchPrefix: '/carrier/fleet',
-    emoji: '🚛',
-    labelKey: 'fleet',
-  },
-  {
-    href: '/carrier/delegations',
-    matchPrefix: '/carrier/delegations',
-    emoji: '🗺️',
-    labelKey: 'delegations',
-  },
-  // Phase 12 — «Porozumienie» (docs/14 §12.3): the guarantee-obligation home.
-  // Sits next to the wyjazd flow it drives. Carries an attention badge counting
-  // owed vehicles (violated + dueSoon), hidden when 0.
-  {
-    href: '/carrier/porozumienie',
-    matchPrefix: '/carrier/porozumienie',
-    emoji: '🤝',
-    labelKey: 'porozumienie',
-  },
-  // Phase 7.8 — «Przebieg» (docs/14 §7.8): the read-only weekly km tab scoped
-  // to the carrier's own vehicles. Label reuses the `myKm.tab` key.
-  {
-    href: '/carrier/km',
-    matchPrefix: '/carrier/km',
-    emoji: '📈',
-    labelKey: 'km',
-  },
-];
+import { carrierTabsFor } from './carrierTabsConfig';
 
 export function CarrierTabs() {
   const pathname = usePathname();
@@ -76,6 +33,11 @@ export function CarrierTabs() {
 
   // Повторный клик по активной вкладке = рефреш её данных (docs/14 §14).
   const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
+
+  // «Dokumenty» — panel.carrier ∧ carrier_documents.read ∧ an own company
+  // (admin, who also reaches this shell, never qualifies).
+  const { user } = useAuth();
+  const tabs = carrierTabsFor(user !== null && carrierDocumentsCarrierId(user) !== null);
 
   // Attention badge on «Porozumienie» — owed vehicles (violated + dueSoon) from
   // the SAME cached `/me` query the strip + cards read (`GUARANTEE_KEY`), so a
@@ -106,7 +68,7 @@ export function CarrierTabs() {
           a stray vertical scrollbar on the nav. Horizontal tab-scroll on narrow
           viewports is preserved. */}
       <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           // `Wnioski` is `/carrier/claims` but `Nowy` is `/carrier/claims/new`
           // — give the more specific match priority so the user clearly
           // sees which tab they're on.

@@ -49,6 +49,7 @@ import {
 } from '@/lib/hooks/useUsers';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { roleLabelKey } from '@/lib/roles';
+import { overridesMarker } from '@/lib/users/permissionOverrides';
 
 import { UserSheet } from './UserSheet';
 
@@ -246,28 +247,48 @@ export function UsersListView() {
         id: 'role',
         header: t('fields.role'),
         width: 'tight',
-        cell: (row) => (
-          <div className="flex items-center gap-1.5">
-            <Badge variant={ROLE_VARIANT[row.role]}>{tRoles(row.role)}</Badge>
-            {/* Leader flag over the role (docs/28): the role chip stays the
-                base role — lider is not a role — and a neutral chip marks the
-                flag, its tooltip spelling the full label («Lider planistów»).
-                Not `info`: that is the «ręcznie» chip right next to it. */}
-            {row.lider && (
-              <span title={tAll(roleLabelKey(row.role, true))}>
-                <Badge variant="muted">{t('fields.lider')}</Badge>
-              </span>
-            )}
-            {/* A hand-granted role is worth flagging: it is the one thing the
-                directory will NOT re-derive, so an admin looking for "why does
-                this person have this role" needs to see it here. */}
-            {row.roleOverride !== null && (
-              <span title={t('fields.roleOverrideHintShort')}>
-                <Badge variant="info">{t('fields.roleOverrideShort')}</Badge>
-              </span>
-            )}
-          </div>
-        ),
+        cell: (row) => {
+          // docs/14 A.11 — «+1 −2» when the account has per-user permission
+          // overrides (docs/25 B6), e.g. which carriers see their documents.
+          const extraCount = row.extraPermissions?.length ?? 0;
+          const deniedCount = row.deniedPermissions?.length ?? 0;
+          const marker = overridesMarker(extraCount, deniedCount);
+          const markerLabel = marker
+            ? t('permissions.listMarkerAria', { extra: extraCount, denied: deniedCount })
+            : '';
+          return (
+            <div className="flex items-center gap-1.5">
+              <Badge variant={ROLE_VARIANT[row.role]}>{tRoles(row.role)}</Badge>
+              {/* Leader flag over the role (docs/28): the role chip stays the
+                  base role — lider is not a role — and a neutral chip marks the
+                  flag, its tooltip spelling the full label («Lider planistów»).
+                  Not `info`: that is the «ręcznie» chip right next to it. */}
+              {row.lider && (
+                <span title={tAll(roleLabelKey(row.role, true))}>
+                  <Badge variant="muted">{t('fields.lider')}</Badge>
+                </span>
+              )}
+              {/* A hand-granted role is worth flagging: it is the one thing the
+                  directory will NOT re-derive, so an admin looking for "why does
+                  this person have this role" needs to see it here. */}
+              {row.roleOverride !== null && (
+                <span title={t('fields.roleOverrideHintShort')}>
+                  <Badge variant="info">{t('fields.roleOverrideShort')}</Badge>
+                </span>
+              )}
+              {marker && (
+                // The digits are decoration; the sentence is what a screen
+                // reader hears (an `aria-label` on a plain <span> is not read).
+                <span title={markerLabel}>
+                  <Badge variant="muted" className="tabular-nums">
+                    <span aria-hidden>{marker}</span>
+                    <span className="sr-only">{markerLabel}</span>
+                  </Badge>
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         id: 'active',

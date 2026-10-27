@@ -35,6 +35,7 @@ import type {
 } from '@magguarantee/shared';
 
 import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
+import { CarrierDocumentsTab } from '@/components/documents/CarrierDocumentsTab';
 import { DelegationsTable } from '@/components/delegations/DelegationsTable';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
@@ -47,7 +48,6 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
-import { CarrierDocumentsTab } from './CarrierDocumentsTab';
 import { CarrierPorozumieniaTab } from './CarrierPorozumieniaTab';
 import { formatDateFull } from '@/lib/format/numbers';
 import { listDrivers } from '@/lib/api/drivers';

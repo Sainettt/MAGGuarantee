@@ -186,7 +186,7 @@ Runtime-поведение ни одной роли не меняется, по�
 | B1 | `LIDER_PERMISSIONS: Partial<Record<LiderRole, readonly Permission[]>>` (на старте `{}`); `permissionsFor(role, lider = false) = ROLE_PERMISSIONS[role] ∪ (lider ? LIDER_PERMISSIONS[role] ?? [] : [])`. Тест: `permissionsFor(r, true) ⊇ permissionsFor(r, false)` — лидер только добавляет. В сгенерированной матрице docs/03 под-строка «+ lider» появляется только у непустых |
 | B2 | `AuthUser.permissions` считается из `(user.role, user.lider)` — `lider` уже в `AuthUser` после L2. Фикстура `endpoint-roles.snapshot.json` **не меняется**. Эндпоинт только для лидера записывается в фикстуре как `["admin", "planista+lider"]` |
 | B3 / B4 | Без изменений; `useCan(p)` в web учитывает лидера автоматически через `/auth/me.permissions` |
-| B6 | `effective = permissionsFor(role, lider) ∪ extra − denied`; `GRANTABLE_EXTRA` по-прежнему по роли — лидер не меняет scope-ветку |
+| B6 | `effective = permissionsFor(role, lider) ∪ extra − denied`; `GRANTABLE_EXTRA` по-прежнему по роли — лидер не меняет scope-ветку. ✅ 2026-10-27: так и сделано; снятие флага `lider` обрезает отзыв лидерского права (`pruneOverrides`) с audit-строкой |
 | Scope («не цель» B) | Будущее расширение scope лидера живёт **внутри** ветки базовой роли: `if (user.role === 'planista') return user.lider ? { … } : { plannerId: user.sub }`. Это по-прежнему «scope на роли», как требует docs/25 §0 |
 
 **Первый lider-only эндпоинт** (`POST /vehicles/:id/transfer/approve` и т.п.)
