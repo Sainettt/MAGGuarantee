@@ -15,6 +15,10 @@
 //     from the current form values (A.6).
 //   * A role / leader change in the same edit lists the entries it will drop
 //     (A.7) — the form keeps them, so switching back restores them.
+//   * Everything is computed for the role COLUMN (`role`), never for a
+//     hand-granted `roleOverride` (A.3, corrected 2026-10-27): the column is
+//     what the api computes and validates with. A pending override gets a
+//     one-line hint — the next sign-in sync makes it the role and prunes.
 //
 // The form owns the FULL lists (`value`); everything shown is derived through
 // `lib/users/permissionOverrides.ts`. Group headings are `<h4>`s naming their
@@ -59,8 +63,13 @@ const HEADING_FOCUS =
 export type PermissionGroupField = 'extra' | 'denied';
 
 export interface UserPermissionsBlockProps {
-  /** The role the block is computed for — `overridesRole(...)` of the current form values. */
+  /** The role the block is computed for — the role COLUMN the PATCH leaves (the form's `role`). */
   role: Role;
+  /**
+   * A hand-granted role waiting for the next sign-in sync (`pendingRoleOverride`),
+   * or `null`. Shown as a hint only; it does not change what the block computes.
+   */
+  pendingRole?: Role | null;
   lider: boolean;
   managedBy: 'local' | 'magspace';
   /** The form's FULL lists (entries the role does not admit included). */
@@ -76,6 +85,7 @@ export interface UserPermissionsBlockProps {
 
 export function UserPermissionsBlock({
   role,
+  pendingRole = null,
   lider,
   managedBy,
   value,
@@ -169,6 +179,11 @@ export function UserPermissionsBlock({
         <p className="text-xs text-text-sub">{t('description')}</p>
         {managedBy === 'magspace' && (
           <p className="text-xs text-text-sub">{t('magspaceHint')}</p>
+        )}
+        {pendingRole && (
+          <p className="text-xs text-text-sub">
+            {t('roleOverridePendingHint', { role: tRoles(pendingRole) })}
+          </p>
         )}
         {isEmpty && (
           <p className="text-xs text-text-sub">{t('empty', { role: roleLabel })}</p>

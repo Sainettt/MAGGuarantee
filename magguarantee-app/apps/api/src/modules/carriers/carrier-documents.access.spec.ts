@@ -12,7 +12,10 @@
 // through `effectivePermissions`), then the REAL `PermissionsGuard` (APP_GUARD)
 // and the REAL `OpiekunOwnershipGuard` / `CarrierOwnershipGuard` of the
 // controllers. Only the services and Prisma are fakes — neither service has a
-// role branch, the guards ARE the scope.
+// scope branch, the guards ARE the scope. (`CarrierDocumentsService.overview`
+// does take the viewer, for a data scrub only — `sideNumber: null` for a
+// przewoznik, covered in carrier-documents.service.spec.ts; here we only check
+// that the caller reaches it.)
 //
 // Acceptance (docs/25 §3 B6 box): a carrier holding the grant lists, downloads,
 // uploads and sees the overview of HIS carrier (200/201), gets 403 on anyone
@@ -175,7 +178,9 @@ const attachments = {
   })),
   delete: jest.fn(async () => undefined),
 };
-const documents = { overview: jest.fn(async (carrierId: string) => ({ carrierId })) };
+const documents = {
+  overview: jest.fn(async (_viewer: unknown, carrierId: string) => ({ carrierId })),
+};
 
 async function boot(): Promise<INestApplication> {
   Logger.overrideLogger(false);
@@ -263,6 +268,16 @@ describe('carrier documents — access over HTTP (docs/25 B6)', () => {
       );
     });
 
+    it('overview reaches the service with the caller as viewer and his carrier id', async () => {
+      const res = await ROUTES.overview(app, 'carrier-granted', CARRIER_X).expect(200);
+
+      expect(res.body).toEqual({ carrierId: CARRIER_X });
+      expect(documents.overview).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'carrier-granted', role: 'przewoznik' }),
+        CARRIER_X,
+      );
+    });
+
     it('download streams the file', async () => {
       const res = await ROUTES.download(app, 'carrier-granted', CARRIER_X).expect(200);
 
@@ -311,6 +326,15 @@ describe('carrier documents — access over HTTP (docs/25 B6)', () => {
 
     it.each(ALL)('opiekun: %s on his own carrier → success', async (route) => {
       await ROUTES[route](app, 'opiekun-own', CARRIER_X).expect(OK[route]);
+    });
+
+    it('opiekun: overview reaches the service with the opiekun as viewer', async () => {
+      await ROUTES.overview(app, 'opiekun-own', CARRIER_X).expect(200);
+
+      expect(documents.overview).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'opiekun-own', role: 'opiekun' }),
+        CARRIER_X,
+      );
     });
 
     it.each(ALL)('opiekun: %s on a carrier he does not look after → 403', async (route) => {

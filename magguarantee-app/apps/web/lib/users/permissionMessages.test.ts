@@ -27,6 +27,7 @@ const USERS_KEYS: [string, Record<string, string | number>][] = [
   ['permissions.title', {}],
   ['permissions.description', {}],
   ['permissions.magspaceHint', {}],
+  ['permissions.roleOverridePendingHint', ROLE],
   ['permissions.empty', ROLE],
   ['permissions.extra.title', {}],
   ['permissions.extra.hint', ROLE],

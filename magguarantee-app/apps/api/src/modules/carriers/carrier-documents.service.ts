@@ -9,6 +9,7 @@ import {
   type CarrierDocumentsOverviewDto,
 } from '@magguarantee/shared';
 
+import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierAttachmentsService } from './carrier-attachments.service';
 import {
   CarrierDocumentsRepository,
@@ -37,8 +38,13 @@ const VEHICLE_DOC_CATEGORIES: readonly CarrierDocVehicleCategory[] = [
  * Gathers EVERY live document tied to one carrier, grouped by owning entity, in
  * a fixed set of reads (one per group). Ownership scoping is enforced upstream
  * by the controller's `OpiekunOwnershipGuard` (admin sees all, opiekun only
- * their own carriers) — same posture as the carrier detail / attachments
- * endpoints; here we only do the existence/404 backstop.
+ * their own carriers) and `CarrierOwnershipGuard` (a przewoznik holding the B6
+ * grant only his own carrier) — same posture as the carrier detail /
+ * attachments endpoints; here we only do the existence/404 backstop.
+ *
+ * The one viewer-dependent bit is a DATA scrub, not scope: a przewoznik viewer
+ * gets `vehicle.sideNumber: null` on every vehicle-document entry (internal
+ * MAGTRANS designation, docs/14-design-system.md B.5) — see `_showsSideNumber`.
  *
  * Downloads are NOT re-invented: each entry carries the ids the EXISTING
  * per-entity download route needs (see the DTO doc block in
@@ -52,7 +58,10 @@ export class CarrierDocumentsService {
     private readonly carrierAttachments: CarrierAttachmentsService,
   ) {}
 
-  async overview(carrierId: string): Promise<CarrierDocumentsOverviewDto> {
+  async overview(
+    viewer: AuthUser,
+    carrierId: string,
+  ): Promise<CarrierDocumentsOverviewDto> {
     await this._assertCarrierExists(carrierId);
 
     const [
@@ -74,7 +83,10 @@ export class CarrierDocumentsService {
     return {
       carrierId,
       carrierDocs,
-      vehicleDocs: this._groupVehicleDocs(vehicleRows),
+      vehicleDocs: this._groupVehicleDocs(
+        vehicleRows,
+        this._showsSideNumber(viewer),
+      ),
       vehicleAdr: vehicleAdr.map((v) => ({
         vehicleId: v.vehicleId,
         plate: v.plate,
@@ -92,13 +104,28 @@ export class CarrierDocumentsService {
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');
   }
 
+  /** Whether the viewer may see `Vehicle.sideNumber` on the vehicle refs. */
+  private _showsSideNumber(viewer: AuthUser): boolean {
+    // scope: viewer-role data scrub, not a permission — like the
+    // `vehicles.rates.read` field scrub, but keyed on the role on purpose:
+    // `Vehicle.sideNumber` is the internal MAGTRANS designation and never
+    // reaches a carrier (docs/14-design-system.md B.5, same rule as the carrier
+    // «Auta» table). A przewoznik gets here only through the B6 grant of
+    // `carrier_documents.read` — that grant opens the documents, not the
+    // internal designation, so there is no catalog right for it and none must
+    // be added. admin / opiekun (the role holders) keep it.
+    return viewer.role !== 'przewoznik';
+  }
+
   /**
    * Buckets the flat vehicle-attachment rows into the per-category map the UI
    * renders. Every category key is always present (empty array when the carrier
    * has no file in it) so the tab shows a stable set of sections.
+   * `showSideNumber` false → every vehicle ref carries `sideNumber: null`.
    */
   private _groupVehicleDocs(
     rows: CarrierVehicleAttachmentRow[],
+    showSideNumber: boolean,
   ): CarrierDocVehicleDocs {
     const grouped: CarrierDocVehicleDocs = {
       gps: [],
@@ -109,13 +136,16 @@ export class CarrierDocumentsService {
       // Defensive: the repo query already restricts to these categories, so a
       // stray category never lands here — but guard the index either way.
       const bucket = grouped[row.category as CarrierDocVehicleCategory];
-      if (bucket) bucket.push(toVehicleEntry(row));
+      if (bucket) bucket.push(toVehicleEntry(row, showSideNumber));
     }
     return grouped;
   }
 }
 
-function toVehicleEntry(row: CarrierVehicleAttachmentRow): CarrierDocVehicleEntry {
+function toVehicleEntry(
+  row: CarrierVehicleAttachmentRow,
+  showSideNumber: boolean,
+): CarrierDocVehicleEntry {
   return {
     attachmentId: row.attachmentId,
     fileName: row.fileName,
@@ -124,7 +154,7 @@ function toVehicleEntry(row: CarrierVehicleAttachmentRow): CarrierDocVehicleEntr
     vehicle: {
       id: row.vehicleId,
       registration: row.registration,
-      sideNumber: row.sideNumber,
+      sideNumber: showSideNumber ? row.sideNumber : null,
     },
   };
 }

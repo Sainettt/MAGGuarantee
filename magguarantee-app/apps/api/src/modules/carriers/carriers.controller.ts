@@ -99,10 +99,13 @@ export class CarriersController {
    * Gate: `carrier_documents.read` (the documents permission, like the
    * attachments endpoints — not `carriers.read`): admin and opiekun by role,
    * a przewoznik only through the per-user grant (docs/25 §3 B6). Scope =
-   * the ownership guards (`CarrierDocumentsService` has no role branch):
+   * the ownership guards (`CarrierDocumentsService` has no scope branch):
    * admin sees all, opiekun only their own carriers (`OpiekunOwnershipGuard`
    * on the class), przewoznik only his own carrier (`CarrierOwnershipGuard`,
-   * this route only). Per docs/13-api-design.md#carriers.
+   * this route only). The viewer is passed down for one data scrub only: a
+   * przewoznik gets `vehicle.sideNumber: null` (internal MAGTRANS
+   * designation, docs/14-design-system.md B.5). Per
+   * docs/13-api-design.md#carriers.
    */
   @Get(':id/documents/overview')
   @RequirePermission('carrier_documents.read')
@@ -110,9 +113,10 @@ export class CarriersController {
   @OpiekunOwns('id', 'param', 'carrierId')
   @CarrierOwns('id', 'param', 'carrierId')
   async documentsOverview(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<CarrierDocumentsOverviewDto> {
-    return this.documents.overview(id);
+    return this.documents.overview(user, id);
   }
 
   @Post()

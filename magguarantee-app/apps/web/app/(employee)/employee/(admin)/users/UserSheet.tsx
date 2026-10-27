@@ -31,7 +31,9 @@
 // `deniedPermissions` lists; the PATCH carries the part the final `(role,
 // lider)` admits, and each list only when it differs from the stored one. The
 // four B6 refusals (422) are shown under their group / the role field, never
-// as a toast.
+// as a toast. `role` here is the role COLUMN (the select, locked to the stored
+// role on MAGSpace accounts) — never `roleOverride`: the column is what the api
+// computes and validates with; a pending override only gets a hint.
 //
 // Carrier rows (A.8): the role is bound to the Carrier row — the access
 // fields render as a read-only <dl> under one <LockNotice>, and the PATCH
@@ -97,7 +99,7 @@ import {
 import {
   droppedOnRoleChange,
   overridesPatch,
-  overridesRole,
+  pendingRoleOverride,
   type OverridesState,
 } from '@/lib/users/permissionOverrides';
 import {
@@ -286,13 +288,8 @@ export function UserSheet({ open, user, onClose }: Props) {
   );
   const permissionErrorMessage = (error: PermissionOverrideError): string =>
     t(permissionErrorMessageKey(error), {
-      role: tRoles(
-        overridesRole({
-          role: form.getValues('role'),
-          managedBy: form.getValues('managedBy'),
-          roleOverride: form.getValues('roleOverride'),
-        }),
-      ),
+      // The role the api judged the lists against — the role column.
+      role: tRoles(form.getValues('role')),
       list: listFormat.format(error.permissions.map((p) => tPerm(permissionLabelKey(p)))),
     });
 
@@ -399,14 +396,11 @@ export function UserSheet({ open, user, onClose }: Props) {
           rest.roleOverride = null;
         }
         // Per-user permissions (A.7): the part of the form's lists that the
-        // FINAL `(role, lider)` admits — `lider` as the api merges it — and
-        // each list only when it differs from the stored one.
+        // FINAL `(role, lider)` admits — the role column (`roleOverride` is
+        // not consulted, the api validates against `role`) and `lider` as the
+        // api merges it — and each list only when it differs from the stored one.
         const { kept } = droppedOnRoleChange(
-          overridesRole({
-            role: values.role,
-            managedBy: values.managedBy,
-            roleOverride: values.roleOverride,
-          }),
+          values.role,
           lider ?? user.lider,
           {
             extra: values.extraPermissions ?? [],
@@ -503,17 +497,23 @@ export function UserSheet({ open, user, onClose }: Props) {
     [lidersQ.data, user],
   );
   // ── «Uprawnienia indywidualne» (A.1–A.15) ────────────────────────────
-  // Computed for the role and leader flag the api will END with: the
-  // hand-granted role on a MAGSpace account (W16), `lider` as merged by
-  // `liderPatchValue` (an unchanged / mapping-owned flag keeps the stored one).
+  // Computed for the role and leader flag the api will END with: the role
+  // COLUMN (the select — locked to the stored role on a MAGSpace account; a
+  // hand-granted `roleOverride` reaches it only at the next sign-in sync,
+  // which then prunes the lists, so it only gets a hint), and `lider` as
+  // merged by `liderPatchValue` (an unchanged / mapping-owned flag keeps the
+  // stored one). Corrected 2026-10-27 — was `roleOverride || role`.
   const watchedLider = form.watch('lider');
   const watchedExtra = form.watch('extraPermissions');
   const watchedDenied = form.watch('deniedPermissions');
-  const overridesBlockRole = overridesRole({
-    role: watchedRole,
-    managedBy: watchedManagedBy,
-    roleOverride: watchedRoleOverride,
-  });
+  const overridesBlockRole = watchedRole;
+  const overridesPendingRole = isEdit
+    ? pendingRoleOverride({
+        role: watchedRole,
+        managedBy: watchedManagedBy,
+        roleOverride: watchedRoleOverride,
+      })
+    : null;
   const overridesBlockLider =
     isEdit && user
       ? (liderPatchValue(liderState, watchedLider, user.lider) ?? user.lider)
@@ -814,6 +814,7 @@ export function UserSheet({ open, user, onClose }: Props) {
                 <UserPermissionsBlock
                   key={user.id}
                   role={overridesBlockRole}
+                  pendingRole={overridesPendingRole}
                   lider={overridesBlockLider}
                   managedBy={watchedManagedBy}
                   value={{ extra: watchedExtra ?? [], denied: watchedDenied ?? [] }}

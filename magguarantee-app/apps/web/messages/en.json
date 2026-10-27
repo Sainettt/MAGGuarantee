@@ -161,6 +161,7 @@
       "title": "Individual permissions",
       "description": "Exceptions to the role for this account. The role still decides the panel and the data scope.",
       "magspaceHint": "MAGSpace sync doesn't change these settings. If it changes the account's role, exceptions that no longer fit are removed.",
+      "roleOverridePendingHint": "After the next sign-in the role becomes {role} — rights that do not fit it will be removed.",
       "empty": "No exceptions — the account has exactly the {role} role's permissions.",
       "extra": {
         "title": "Added",

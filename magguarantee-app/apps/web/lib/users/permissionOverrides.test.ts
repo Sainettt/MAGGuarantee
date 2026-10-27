@@ -18,7 +18,7 @@ import {
   isLiderPermission,
   overridesMarker,
   overridesPatch,
-  overridesRole,
+  pendingRoleOverride,
   requiredFor,
   toggleDenied,
   toggleExtra,
@@ -27,29 +27,34 @@ import {
 const ALL_ROLES: readonly Role[] = RoleSchema.options;
 const NONE = { extra: [] as Permission[], denied: [] as Permission[] };
 
-describe('overridesRole (A.3 — the W16 rule)', () => {
-  it('local account → role', () => {
-    expect(overridesRole({ role: 'pracownik', managedBy: 'local', roleOverride: 'opiekun' })).toBe(
-      'pracownik',
-    );
+describe('pendingRoleOverride (A.3, corrected 2026-10-27 — the block follows `role`)', () => {
+  it('MAGSpace account with an override different from role → that override', () => {
+    expect(
+      pendingRoleOverride({ role: 'pracownik', managedBy: 'magspace', roleOverride: 'opiekun' }),
+    ).toBe('opiekun');
   });
 
-  it('MAGSpace account → the hand-granted role when set, else role', () => {
-    expect(overridesRole({ role: 'pracownik', managedBy: 'magspace', roleOverride: 'opiekun' })).toBe(
-      'opiekun',
-    );
-    expect(overridesRole({ role: 'pracownik', managedBy: 'magspace', roleOverride: '' })).toBe(
-      'pracownik',
-    );
-    expect(overridesRole({ role: 'pracownik', managedBy: 'magspace', roleOverride: null })).toBe(
-      'pracownik',
-    );
+  it('already synced (override = role), no override, or a local account → none', () => {
+    expect(
+      pendingRoleOverride({ role: 'opiekun', managedBy: 'magspace', roleOverride: 'opiekun' }),
+    ).toBeNull();
+    expect(
+      pendingRoleOverride({ role: 'pracownik', managedBy: 'magspace', roleOverride: '' }),
+    ).toBeNull();
+    expect(
+      pendingRoleOverride({ role: 'pracownik', managedBy: 'magspace', roleOverride: null }),
+    ).toBeNull();
+    expect(
+      pendingRoleOverride({ role: 'pracownik', managedBy: 'local', roleOverride: 'opiekun' }),
+    ).toBeNull();
   });
 
-  it('a carrier row is always przewoznik', () => {
-    expect(overridesRole({ role: 'przewoznik', managedBy: 'magspace', roleOverride: 'opiekun' })).toBe(
-      'przewoznik',
-    );
+  it('a pending override does not change what the block computes: the stored role decides', () => {
+    // A pracownik with a pending opiekun override still holds (and may be
+    // denied) pracownik rights only — what the api validates against.
+    const full = { extra: [], denied: ['claims.verify'] as Permission[] };
+    expect(droppedOnRoleChange('pracownik', false, full)).toEqual({ kept: full, dropped: NONE });
+    expect(deniedOptions('pracownik', false)).not.toContain('carriers.write');
   });
 });
 

@@ -161,6 +161,7 @@
       "title": "Uprawnienia indywidualne",
       "description": "Wyjątki od roli dla tego konta. Rola nadal decyduje o panelu i zakresie danych.",
       "magspaceHint": "Synchronizacja z MAGSpace nie zmienia tych ustawień. Jeśli zmieni rolę konta, niepasujące wyjątki zostaną usunięte.",
+      "roleOverridePendingHint": "Po następnym logowaniu rola zmieni się na {role} — uprawnienia niepasujące do niej zostaną usunięte.",
       "empty": "Brak wyjątków — konto ma dokładnie uprawnienia roli {role}.",
       "extra": {
         "title": "Dodatkowe",

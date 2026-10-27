@@ -382,7 +382,13 @@ export const CarrierDocVehicleRefSchema = z.object({
   id: UuidSchema,
   /** `Vehicle.plateNumber` — the registration plate (label on the tab). */
   registration: z.string(),
-  /** Internal side/board number (`Vehicle.sideNumber`); null when unset. */
+  /**
+   * Internal MAGTRANS side/board number (`Vehicle.sideNumber`); null when
+   * unset, and ALWAYS null for a przewoznik viewer (B6 grant of
+   * `carrier_documents.read`) — the designation never reaches a carrier
+   * (docs/14-design-system.md B.5; server-side scrub in the api
+   * `CarrierDocumentsService`). admin / opiekun get the stored value.
+   */
   sideNumber: z.string().nullable(),
 });
 export type CarrierDocVehicleRef = z.infer<typeof CarrierDocVehicleRefSchema>;

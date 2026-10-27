@@ -37,20 +37,26 @@ export interface StoredOverrides {
   deniedPermissions: readonly Permission[];
 }
 
+// Which role the block is computed for (A.3, corrected 2026-10-27): the
+// `role` COLUMN the PATCH leaves — the form's role select, which is locked to
+// the stored role on a MAGSpace account and on a carrier row — never the
+// hand-granted `roleOverride`. That column is what `effectivePermissionsFor`
+// reads at runtime and what `PATCH /users/:id` validates the lists against; a
+// pending override becomes the role only at the next sign-in sync, which then
+// prunes the lists itself (`pendingRoleOverride` drives the hint about it).
+
 /**
- * The role the block is computed for (A.3): the hand-granted `roleOverride`
- * on a MAGSpace account, `role` otherwise — the rule of «Przełożony (lider)»
- * (W16). A carrier row is always `przewoznik` (its role is locked, A.8).
+ * The hand-granted role still waiting for the next sign-in sync: set on a
+ * MAGSpace account and different from `role`; `null` otherwise. The block
+ * shows `users.permissions.roleOverridePendingHint` for it.
  */
-export function overridesRole(input: {
+export function pendingRoleOverride(input: {
   role: Role;
   managedBy: 'local' | 'magspace';
   roleOverride: Role | '' | null;
-}): Role {
-  if (input.role === 'przewoznik') return 'przewoznik';
-  return input.managedBy === 'magspace' && input.roleOverride
-    ? input.roleOverride
-    : input.role;
+}): Role | null {
+  if (input.managedBy !== 'magspace' || !input.roleOverride) return null;
+  return input.roleOverride === input.role ? null : input.roleOverride;
 }
 
 /** «Dodatkowe» checkboxes (A.3): `GRANTABLE_EXTRA[role]` minus what `(role, lider)` already holds. */

@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1–B5 сделаны 2026-10-23 (B5: `3579226`); B6 в работе с 2026-10-27 — шаг 1 миграция + спека UI `0883ee5`, шаг 2 shared + api `f4c0ef6`, шаг 3 web — в работе (первый случай — §3 B6).** Коммиты этапов: B1 `2419bfc`; B2 `67f5a8b`…`94fbcff` + B2d; B3 `14f979a` (сервисные capability → `can()`, scope помечен `// scope:`); B4 `1cf8d89` (api `UserDto.permissions`) + `37e5dc3` (web); B5 `3579226` (deny by default, `@Roles` / `RolesGuard` удалены). Решения по открытым вопросам — §7. Детализирует §3 из
+> **Статус: B1–B5 сделаны 2026-10-23 (B5: `3579226`); B6 сделан 2026-10-27 — шаг 1 миграция + спека UI `0883ee5`, шаг 2 shared + api `f4c0ef6`, шаг 3 web `c1064b2` + хвосты (первый случай — §3 B6). Трек B закрыт; открыт только UWAGI #17 (страницы без `requirePermission`).** Коммиты этапов: B1 `2419bfc`; B2 `67f5a8b`…`94fbcff` + B2d; B3 `14f979a` (сервисные capability → `can()`, scope помечен `// scope:`); B4 `1cf8d89` (api `UserDto.permissions`) + `37e5dc3` (web); B5 `3579226` (deny by default, `@Roles` / `RolesGuard` удалены). Решения по открытым вопросам — §7. Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -462,6 +462,15 @@ gps service / repository, vehicle-daily-km, bugbot controller и пять spec-�
 | Смена роли | extra-права, не входящие в `GRANTABLE_EXTRA[newRole]`, и denied-права, которых нет в `permissionsFor(newRole)`, сбрасываются с audit-строкой (как `roleOverride` при переходе в `local`, docs/24 §9 п.8) |
 
 Оценка B6: ≈ 2–2.5 дня (db + api + web + docs; отзыв добавляет UI и зависимости прав).
+
+**Сделано (2026-10-27): `0883ee5` миграция + спека UI, `f4c0ef6` shared + api, `c1064b2` web.** Пользователь без overrides ведёт себя ровно как раньше (тест по всем ролям × lider); фикстуры ролей и прав байт в байт, фикстура ownership изменилась ровно на 5 маршрутах документов перевозчика (добавлена проверка «свой перевозчик»). Отличия от таблицы выше и решения по ходу:
+- **Фильтр с обеих сторон:** `effective = (base ∪ (extra ∩ GRANTABLE_EXTRA[role])) − denied` — пропущенная обрезка никогда не расширяет доступ; отзыв побеждает даже если право есть в обоих списках.
+- **Четыре места смены роли/лидера** обрезают overrides одним хелпером `pruneOverrides` (`users.update`, sign-in sync, `grantAccess`, reconcile) с audit `system.pruneUserPermissions`; справочник поля никогда не задаёт. Переход в admin сбрасывает все отзывы.
+- **422-коды `PATCH /users/:id`:** `USER_PERMISSION_NOT_GRANTABLE`, `USER_PERMISSION_NOT_REVOCABLE`, `USER_ADMIN_CANNOT_BE_DENIED` (отзыв у admin запрещён — защита от самоблокировки), все с `extensions.permissions`. Попутно закрыта дыра: `role` в теле для перевозчика → 422 `USER_CARRIER_ROLE_LOCKED` (UserSheet молча превращал перевозчика в pracownika).
+- **`UserDto.carrierId`** (один запрос, только для перевозчиков) — web ходит в `/carriers/:id/…` своего перевозчика.
+- **Web:** `UserPermissionsBlock` считает от сохранённого `role` (как api), при ожидающем `roleOverride` — подсказка; `/carrier/dokumenty` не в `PATH_PERMISSIONS` (edge overrides не видит), страница гейтится `requirePermission` + scope przewoznik; tripwire-тест `lib/auth/edgeOverrides.test.ts` на будущие записи `GRANTABLE_EXTRA`; `/employee` ведёт на первую видимую вкладку (отзыв `dashboard.read` больше не зацикливает редирект).
+- **Открыто (отдельный PR, UWAGI #17):** 8 страниц из меню сотрудника (`/employee/opieka`, `/alerts`, `/moje-pojazdy`, `/opieka/delegations`, `/carriers`, `/vehicles`, `/drivers`, `/trailers`) и две вне меню не вызывают `requirePermission` — отозванное право прячет пункт меню, но страница по прямому URL показывает 403 от api.
+- Приёмка по сценарию из врезки выше покрыта `carrier-documents.access.spec.ts` (39 HTTP-тестов через реальные guard'ы) и web-тестами; в браузере не проверялось.
 
 ---
 
