@@ -349,6 +349,28 @@ model User {
   // the DB — see docs/28 §7 R2.
   lider              Boolean       @default(false)
 
+  // Per-user permission overrides (docs/25 §3 B6). The api computes the
+  // effective rights on every request (JwtAccessStrategy) as
+  //   (permissionsFor(role, lider) ∪ extraPermissions) − deniedPermissions
+  // — denial wins over grant. Values are permission keys of the shared catalog
+  // (`PERMISSIONS`, e.g. "carrier_documents.read"). Plain text[] with NO DB
+  // CHECK against the catalog: it lives in code and changes without a
+  // migration, so validity is the api's job.
+  //   extraPermissions  — rights granted ON TOP of the role. Only values in
+  //                       `GRANTABLE_EXTRA[role]` are honoured; the api filters
+  //                       on write AND on read, so an unknown or non-grantable
+  //                       string is inert.
+  //   deniedPermissions — rights REMOVED from the role's base set. A value
+  //                       outside `permissionsFor(role, lider)` is inert. Admin
+  //                       rows never carry any (api 422).
+  // Owned by an admin only (UserSheet / `PATCH /users/:id`) — editable on
+  // `managedBy = magspace` rows too. The directory reconcile, sign-in sync and
+  // grantAccess never SET them; but whenever `role` or `lider` changes (by an
+  // admin or by the directory) the entries that no longer fit are pruned, with
+  // an audit row. Empty array = no override (the default for every row).
+  extraPermissions  String[] @default([])
+  deniedPermissions String[] @default([])
+
   // role-specific fields (NULL for other roles)
 
   // PLANISTA — the planista's leader (docs/29 R8, U9). Meaningful only on

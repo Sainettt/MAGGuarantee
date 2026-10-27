@@ -10,9 +10,10 @@
 // created via the API. The seed only builds a small demo fleet: one carrier,
 // three vehicles, and the docs/29 planner-transfer scenario (transfer requests
 // in every status, a vehicle with two planista-history rows and delegations on
-// both sides of the transfer). Rows without a unique business key (history,
-// transfer requests, delegations) use FIXED ids, so a re-run upserts the same
-// rows instead of appending new ones.
+// both sides of the transfer); plus a second, fleet-less carrier whose user
+// holds a per-user permission grant (docs/25 B6). Rows without a unique
+// business key (history, transfer requests, delegations) use FIXED ids, so a
+// re-run upserts the same rows instead of appending new ones.
 
 import bcrypt from 'bcryptjs';
 
@@ -55,6 +56,10 @@ type SeedUser = {
   // `User.liderId`. Must be a planista with `lider: true`, not the user himself.
   // Omitted = no leader (then only an admin decides his transfer requests, R4).
   liderLogin?: string;
+  // Per-user grant ON TOP of the role (docs/25 B6, `User.extraPermissions`).
+  // Keys of the shared catalog; the api honours only those in
+  // `GRANTABLE_EXTRA[role]`, anything else is inert. Omitted = none.
+  extraPermissions?: string[];
 };
 
 const SEED_USERS: SeedUser[] = [
@@ -73,6 +78,17 @@ const SEED_USERS: SeedUser[] = [
   { login: 'dyspozytor1', email: 'dyspozytor1@magtrans.eu', name: 'Dyspozytor 1', role: Role.dyspozytor },
   { login: 'dyspozytor2', email: 'dyspozytor2@magtrans.eu', name: 'Dyspozytor 2', role: Role.dyspozytor },
   { login: 'przewoznik1', email: 'przewoznik1@magtrans.eu', name: 'Przewoznik 1', role: Role.przewoznik },
+  // docs/25 B6, first real case: a carrier picked by an admin sees his firm's
+  // documents like an opiekun does and may only UPLOAD (no delete). przewoznik1
+  // above stays without the grant — the "no tab, 403" side of the acceptance.
+  // Backed by its own fleet-less Carrier (seedDocumentsCarrier).
+  {
+    login: 'przewoznik2',
+    email: 'przewoznik2@magtrans.eu',
+    name: 'Przewoznik 2 (dokumenty)',
+    role: Role.przewoznik,
+    extraPermissions: ['carrier_documents.read', 'carrier_documents.add'],
+  },
   { login: 'eksport1', email: 'eksport1@magtrans.eu', name: 'Eksport 1', role: Role.eksport },
   { login: 'weryfikator1', email: 'weryfikator1@magtrans.eu', name: 'Weryfikator 1', role: Role.weryfikator },
   // Leaders (docs/28) — one per role in `LIDER_ROLES`. Same base role, same
@@ -154,6 +170,12 @@ const DEMO_VEHICLE_PLANNER_LOGIN = 'planista1';
 const DEMO_TRAILER_PLATE = 'WX 99999';
 const DEMO_DRIVER_SLUG = 'andrii.kowal';
 
+// Second demo carrier (docs/25 B6) — backs przewoznik2, the user with the
+// `carrier_documents.read` / `.add` grant. No vehicles / drivers / trailers:
+// the case is about the firm's documents, and the fleet-documents overview may
+// just as well be empty. Same opiekun as the first carrier.
+const DOCUMENTS_CARRIER_USER_LOGIN = 'przewoznik2';
+
 // ─── Planner transfer demo (docs/29) ────────────────────
 // Two more vehicles of the demo carrier:
 //   - TRANSFERRED — planista1 → planista2 via an APPROVED request (decided by
@@ -218,6 +240,7 @@ async function seedUsers(passwordHash: string): Promise<number> {
         name: u.name,
         role: u.role,
         lider: u.lider ?? false,
+        extraPermissions: u.extraPermissions ?? [],
         passwordHash,
         active: true,
       },
@@ -230,6 +253,12 @@ async function seedUsers(passwordHash: string): Promise<number> {
         name: u.name,
         role: u.role,
         lider: u.lider ?? false,
+        // Per-user permission overrides (docs/25 B6) converge like `lider`:
+        // the seed is the source of truth for its demo accounts, so a grant or
+        // denial made through the UI on a seeded user is reset by a re-run.
+        // The seed declares no denials.
+        extraPermissions: u.extraPermissions ?? [],
+        deniedPermissions: [],
         active: true,
       },
     });
@@ -473,6 +502,34 @@ async function seedDemoFleet(): Promise<DemoFleet> {
     driverName: `${driver.firstName} ${driver.lastName}`,
     driverPhone: driver.phone,
   };
+}
+
+async function seedDocumentsCarrier(): Promise<void> {
+  const carrierUser = await prisma.user.findUniqueOrThrow({
+    where: { login: DOCUMENTS_CARRIER_USER_LOGIN },
+  });
+  const opiekun = await prisma.user.findUniqueOrThrow({
+    where: { login: DEMO_CARRIER_OPIEKUN_LOGIN },
+  });
+  // Only DB-NOT-NULL fields; idempotent via the unique userId.
+  await prisma.carrier.upsert({
+    where: { userId: carrierUser.id },
+    create: {
+      userId: carrierUser.id,
+      company: 'Demo Dokumenty Sp. z o.o.',
+      nip: '9876543210',
+      contactPerson: 'Anna Nowak',
+      phone: '+48600500600',
+      ordersEmail: 'zlecenia@demo-dokumenty.pl',
+      accountEur: 'PL00112233445566778899001122',
+      insuranceValue: '300000.00',
+      companyAddress: 'ul. Testowa 2, 00-002 Warszawa',
+      opiekunId: opiekun.id,
+    },
+    update: {
+      opiekunId: opiekun.id,
+    },
+  });
 }
 
 // ─── Planner transfer demo (docs/29) ────────────────────
@@ -826,7 +883,11 @@ function printBanner(
   for (const u of SEED_USERS) {
     const login = u.login.padEnd(longestLogin, ' ');
     const email = `(${u.email})`.padEnd(longestEmail + 2, ' ');
-    const tags = [u.lider ? 'lider' : null, u.liderLogin ? `lider=${u.liderLogin}` : null].filter(Boolean);
+    const tags = [
+      u.lider ? 'lider' : null,
+      u.liderLogin ? `lider=${u.liderLogin}` : null,
+      u.extraPermissions?.length ? `extra=${u.extraPermissions.join(',')}` : null,
+    ].filter(Boolean);
     console.log(`  - ${login}   ${email}   role=${u.role}${tags.length ? ` (${tags.join(', ')})` : ''}`);
   }
   const demoTeamDispatcherCount =
@@ -837,6 +898,9 @@ function printBanner(
     `Seeded Team:        ${teamCount} teams ` +
       `(${DEMO_TEAM_CODE}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazdy, ` +
       `${EMPTY_TEAM_CODE}=pusty)`,
+  );
+  console.log(
+    `Seeded Carrier:     2 (${DEMO_CARRIER_USER_LOGIN} z flotą; ${DOCUMENTS_CARRIER_USER_LOGIN} bez floty — docs/25 B6)`,
   );
   console.log(
     `Seeded Vehicle:     ${vehicleCount} demo vehicles (${DEMO_VEHICLE_PLATE}; ` +
@@ -867,6 +931,8 @@ async function main(): Promise<void> {
   // (vehicle references the demo team).
   const teamCount = await seedTeams();
   const fleet = await seedDemoFleet();
+  // After the users (przewoznik2, opiekun1) it references.
+  await seedDocumentsCarrier();
   // After the fleet (carrier / trailer / driver) and the users (planisci, their
   // lider, eksport, weryfikator) it references.
   const transferDemo = await seedPlannerTransferDemo(fleet);

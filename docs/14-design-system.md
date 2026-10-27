@@ -306,6 +306,8 @@ npm exec -w web -- shadcn@latest add button input label dialog \
 | `<ThemeToggle>` | `.theme-toggle` (`index.html:272-276`) | В app-header |
 | `<ReklamacjaResolutionChip>` | — (нет в legacy: статус больше не несёт исход рекламации) | Wynik reklamacji `UZNANA`/`ODRZUCONA`/pending — carrier detail, `<ClaimCard>`, employee `<ClaimsTable>`, `ClaimModal`. Тонкая обёртка над `<Badge>`, см. «Reklamacja — carrier claim-detail outcome block» + §6.5.15 |
 | `<ReklamacjaOutcome>` | — | Карточка исхода рекламации на carrier claim detail (`ReklamacjaOutcome.tsx`) |
+| `<UserPermissionsBlock>` | — (нет в legacy) | Композиция в `UserSheet`: «Dodatkowe» / «Odebrane» / «Uprawnienia efektywne» (docs/25 B6, 2026-10-27). См. «`UserSheet` — блок «Uprawnienia indywidualne»» |
+| `<CarrierDocumentsTab>` | — | Каталог документов фирмы + обзор флота (§5R); с 2026-10-27 общий для opiekun и перевозчика с `carrier_documents.read` (`components/documents/`). См. «Carrier «Dokumenty» tab» |
 
 ## Скриншоты компонент-критичных мест
 
@@ -962,6 +964,244 @@ Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase
 
 **Create user:** `<Button>Dodaj użytkownika</Button>` в header → `<Sheet w-[480px]>` с формой (email, имя, role select, опц. assignedCarriers для opiekun).
 
+### `UserSheet` — блок «Uprawnienia indywidualne» (docs/25 B6, NEW 2026-10-27 — AUTHORITATIVE)
+
+> **Changelog.**
+> - 2026-10-27 — первая версия (трек B, этап B6; решение 2026-10-27 «точечные права пользователю»). Затронуты: `UserSheet` (новый блок + режим строки перевозчика), опционально `UsersListView` (маркер исключений). Токенов 0, новых типов компонентов 0 — блок собирается из `Checkbox`, `Badge`, `Button`, `FormMessage`, `LockNotice` и рецепта notice-строки.
+
+> **Scope.** Как выглядит и называется редактирование `extraPermissions` / `deniedPermissions`. Поведение и правила — [docs/25 §3 B6](25-permissions-layer-plan.md): `effective = (permissionsFor(role, lider) ∪ extra) − denied`, отзыв побеждает добавление; `GRANTABLE_EXTRA[role]` — что можно добавить; `DEPENDENT_PERMISSIONS` — зависимости; смена роли сбрасывает неподходящие записи с audit-строкой. Если текст ниже расходится с docs/25 по **поведению** — прав docs/25; по **виду, копирайту, размещению** — прав этот раздел.
+
+#### A.1 Где стоит блок
+
+Последняя секция `<SheetBody>` в **режиме правки** (на создании не рендерится: новый пользователь стартует ровно с правами роли, исключения настраиваются после создания). Порядок тела формы не меняется до блока: login → imię → e-mail → rola → «Lider» → «Przełożony (lider)» → aktywny → zarządzanie → rola przyznana ręcznie → **«Uprawnienia indywidualne»**.
+
+- Отделение — паттерн Section divider из §Form patterns: `mt-2 border-t border-border pt-4`, заголовок секции `<h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">` `users.permissions.title`.
+- Под заголовком — `text-xs text-text-sub` `users.permissions.description`. Для `managedBy = magspace` вторым абзацем — `users.permissions.magspaceHint` (блок **редактируем** и на MAGSpace-учётке: reconcile его не трогает).
+- **Пустое состояние** (в форме нет ни одного extra и ни одного denied) — под описанием строка `text-xs text-text-sub` `users.permissions.empty`; группы и превью рендерятся как обычно (пусто — нормальное состояние, не CTA).
+- Своего loading-состояния у блока нет: данные — из уже загруженного `UserDtoFull`, справочники (`GRANTABLE_EXTRA`, `DEPENDENT_PERMISSIONS`, `permissionsFor`) — статичный shared-код.
+- Ширина `Sheet` не меняется (`default`, 480px). Список прав — одна колонка: PL-метки длинные, две колонки на 480px переносили бы каждую строку.
+
+#### A.2 Анатомия (сверху вниз)
+
+```
+UPRAWNIENIA INDYWIDUALNE
+Wyjątki od roli dla tego konta. Rola nadal decyduje o panelu i zakresie danych.
+
+[ⓘ Po zapisaniu zostaną usunięte — nie pasują do nowej roli:]   ← только при смене роли/лидера (A.6)
+[   ~~Podgląd stawek ciągnika~~ · odebrane                    ]
+
+Dodatkowe                                                       ← только если GRANTABLE_EXTRA[role] не пуст
+Uprawnienia ponad rolę Przewoźnik.
+[ ] Podgląd dokumentów firmy i floty
+[x] Dodawanie dokumentów firmy
+
+Odebrane · Nic nie odebrano          [Pokaż uprawnienia roli (13) ▾]   ← не для admin
+  WNIOSKI
+  [ ] Podgląd wniosków
+  [ ] Składanie wniosków
+  FLOTA
+  …
+
+Uprawnienia efektywne · 14 uprawnień
+(chip)(chip)(+ chip)…
+
+Zmiana działa od następnej akcji użytkownika i trafia do audytu.
+```
+
+| Часть | Правило | Классы |
+|---|---|---|
+| Подзаголовок группы («Dodatkowe», «Odebrane», «Uprawnienia efektywne») | `<h4>` | `text-sm font-semibold text-text` |
+| Подсказка группы | под подзаголовком | `text-xs text-text-sub` |
+| Строка-чекбокс | один `<label>` оборачивает `Checkbox` + метку (как флаг «Lider» в этом же файле); строка ≥ 36px, на мобильных ≥ 44px | `flex items-start gap-2 py-1.5 text-sm text-text max-sm:min-h-11` ; `Checkbox` `mt-0.5 shrink-0` |
+| Метка права | `t(\`permissions.labels.${id}\`)` — **никогда** не id | — |
+| Суффикс лидерского права в «Odebrane» | право пришло из `LIDER_PERMISSIONS`, а не из роли | `ml-1 text-xs text-text-sub` `permissions.liderSuffix` |
+| Подзаголовок домена внутри «Odebrane» | группировка по домену (A.5), выводятся только непустые домены | `pt-2 text-[11px] font-bold uppercase tracking-wider text-text-sub` |
+| Между группами | — | `space-y-4` |
+
+Группы — `<fieldset>` с `<legend>` = подзаголовок (скринридер читает «Dodatkowe, группа»), описание связано `aria-describedby`.
+
+#### A.3 «Dodatkowe» — права сверх роли
+
+- Источник чекбоксов: `GRANTABLE_EXTRA[effectiveRole]` (порядок — каталожный, как в `PERMISSIONS`). Права, которые роль уже имеет, не выводятся (их нечего добавлять).
+- **Группа скрыта целиком**, если список пуст (сегодня — у всех ролей, кроме `przewoznik`). Не «пустая группа с пояснением», а отсутствие (§Role-gated navigation: «что роль не видит — не рендерится»).
+- `effectiveRole` = `roleOverride || role` для `managedBy = magspace`, иначе `role` — то же правило, что у «Przełożony (lider)» (W16).
+- **Зависимости (`DEPENDENT_PERMISSIONS`), автоматически в обе стороны:**
+  - отметил право, которому нужна база (`carrier_documents.add` → `.read`) — база отмечается сама;
+  - снял базу, на которую опирается отмеченное право, — зависимое снимается само.
+  - Оба автодействия объявляются одной строкой под группой: `text-xs text-text-sub`, `aria-live="polite"`, ключи `users.permissions.extra.autoAdded` / `autoRemoved`; строка гаснет при следующем изменении группы. Без тостов и без `disabled`-чекбоксов (§6.5.13: `disabled` — только для кнопок и транзитных состояний).
+  - Почему автоматически, а у «Odebrane» — подсказкой: выданное право без базы всегда мёртвое (вкладка без данных), спрашивать нечего. Отзыв базового права, наоборот, бывает намеренным (docs/25: «UI предупреждает и предлагает»).
+
+#### A.4 «Odebrane» — права роли, которые у этого человека отняты
+
+- Источник чекбоксов: `permissionsFor(effectiveRole, lider)` — каждое право роли (+ лидерские, с суффиксом «(lider)»). Отмеченный = отозван.
+- **Не выводится для `admin`** (api отказывает в отзыве у admin). Вместе с пустым «Dodatkowe» это значит: у admin блок не рендерится вовсе — кроме notice из A.7, если в этой правке роль сменилась на admin и есть что сбросить.
+- **Раскрытие.** Отзыв — редкая операция, а список длинный (opiekun — 20 прав, przewoznik — 13). Поэтому группа свёрнута, пока ничего не отозвано, и развёрнута при открытии формы, если `deniedPermissions` не пуст. Строка-заголовок: `<h4>` «Odebrane» + `text-xs text-text-sub` сводка `users.permissions.denied.summary` + справа `<Button variant="ghost" size="sm" aria-expanded aria-controls>` `denied.toggleShow` / `denied.toggleHide` с `ChevronDown` (`rotate-180` в раскрытом). Без нового примитива: кнопка + условный рендер списка.
+- **Подсказка о зависимых.** Отмечено право, от которого зависят другие ещё **действующие** права (из роли или из «Dodatkowe»): под этой строкой (`pl-6`, выровнено по тексту метки) —
+
+  `flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-warning-dark dark:text-warning` + `<AlertTriangle size={14} aria-hidden/>` `denied.dependentsHint` («Bez tego uprawnienia nie zadziała: {list}.») + `<Button variant="outline" size="sm">` `denied.dependentsApply` «Odbierz również».
+
+  Клик отмечает все перечисленные: зависимые права роли — в «Odebrane», зависимые extra — снимаются в «Dodatkowe». Подсказка исчезает, когда зависимых не осталось или отзыв базы снят. Сохранять **можно и без** применения — api не падает, просто отвечает 403 (docs/25). Тон — warning, а не danger: это предупреждение о бессмысленной конфигурации, не ошибка. Цвет `text-warning-dark` на `bg-card` — тот же, что у `liderIdStaleHint` (§17.7), AA ✔.
+- Отмеченные строки **не** зачёркиваются: зачёркивание в этом блоке означает только «будет сброшено при сохранении» (A.6). Смешивать нельзя.
+
+#### A.5 Группировка по домену (для «Odebrane» и порядка чипов)
+
+Домен выводится из префикса id; порядок доменов = порядок секций каталога `PERMISSIONS`. Карта живёт в web (`lib/auth/permissionGroups.ts`), тест проверяет, что у каждого id из `PERMISSIONS` есть домен и PL/EN-метка.
+
+| Домен (`permissions.groups.*`) | Префиксы | PL | EN |
+|---|---|---|---|
+| `claims` | `claims.`, `dashboard.` | Wnioski | Claims |
+| `carriers` | `carriers.`, `carrier_documents.` | Przewoźnicy | Carriers |
+| `fleet` | `vehicles.`, `drivers.`, `trailers.`, `fleet.`, `gps.` | Flota | Fleet |
+| `delegations` | `delegations.`, `km.` | Wyjazdy i przebieg | Trips and mileage |
+| `panels` | `panel.` | Panele | Panels |
+| `integrations` | `lookups.`, `integrations.`, `bugbot.` | Słowniki i integracje | Lookups and integrations |
+| `administration` | `users.`, `sso.`, `teams.`, `trailer_types.`, `limits.`, `audit.`, `diagnostics.` | Administracja | Administration |
+
+#### A.6 «Uprawnienia efektywne» — живое превью
+
+- Read-only, считается на клиенте из **текущих значений формы**: `(permissionsFor(effectiveRole, lider) ∪ extra) − denied`, после применения сбросов из A.7.
+- Заголовок `<h4>` + `text-xs text-text-sub` счётчик `effective.count` (`aria-live="polite"` — только на счётчике, не на списке чипов: 20 чипов, зачитанные при каждом клике, — шум). Подсказка `effective.hint`.
+- Чипы — `flex flex-wrap gap-1.5`, порядок по A.5:
+  - право роли / лидера — `<Badge variant="muted">`;
+  - право из «Dodatkowe» — `<Badge variant="success">` с `<Plus size={12} aria-hidden/>` слева и `sr-only` `effective.extraAria`. Цвет — не единственный носитель: есть глиф «+» и скрытый текст.
+  - отозванные в превью **не** выводятся (их видно в «Odebrane»).
+- Пусто (всё отозвано) — вместо чипов `text-xs text-text-sub` `effective.none`.
+
+#### A.7 Смена роли / флага лидера в той же правке
+
+Когда в этой же правке меняется `role`, `roleOverride` (MAGSpace) или `lider`, часть сохранённых записей может перестать подходить: extra вне `GRANTABLE_EXTRA[newRole]` (или уже входящие в новую роль), denied вне `permissionsFor(newRole, newLider)`.
+
+- Над группами — notice-строка (рецепт `<LockNotice>`, но иконка `Info`, т.к. это не блокировка): `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub` + `<Info size={14} className="mt-0.5 shrink-0" aria-hidden/>`, текст `drop.title`, ниже список `<ul>`: каждая запись — `<del className="text-text-sub">{метка}</del>` + ` · ` + тег `drop.extraTag` / `drop.deniedTag`.
+- Сами сбрасываемые записи из чекбокс-списков **уходят** (их чекбоксов в новой роли нет) — notice единственное место, где они видны.
+- Вернул роль обратно — notice исчезает, записи снова на месте (состояние вычисляемое, а не «стёртое»).
+- Отправка: в PATCH уходят списки **уже без** сбрасываемых записей (иначе 422 `USER_PERMISSION_NOT_GRANTABLE`). Поля `extraPermissions` / `deniedPermissions` шлются, только если итоговый список отличается от сохранённого (как `lider` / `liderId`).
+
+#### A.8 Строка перевозчика (`role = przewoznik`)
+
+Сегодня форма приводит `przewoznik` к `pracownik` (`UserSheet.tsx`, `form.reset`) и при сохранении отправила бы чужую роль. С B6 строку перевозчика открывают именно ради этого блока, поэтому:
+
+- **Rola, Lider, Przełożony, Zarządzanie, Rola przyznana ręcznie** — блокировка уровня блока (§6.5.13, tier B): вместо полей — статичный `<dl>` из двух строк (`Rola` → «Przewoźnik», `Zarządzanie` → «Lokalne»; рецепт label/value §(a) Read-only), над ним одна `<LockNotice>` с `users.fields.carrierLocked`. Ни одного `disabled`-select, ни одного замка на поле.
+- В PATCH для перевозчика **никогда** не уходят `role`, `lider`, `liderId`, `managedBy`, `roleOverride`.
+- `login` / `imię` / `e-mail` / `aktywny` — без изменений относительно сегодняшнего поведения формы.
+- Блок «Uprawnienia indywidualne» — главное редактируемое содержимое: «Dodatkowe» = `carrier_documents.read`, `carrier_documents.add`; «Odebrane» = 13 прав роли (свёрнуто).
+- `SheetDescription` = login (как сейчас).
+
+#### A.9 Ошибки сохранения
+
+Обе 422 — **внутри формы, не тостом** (как `USER_LIDER_ID_INVALID`, §17.7): `<FormMessage>` под соответствующей группой, `aria-invalid` на `<fieldset>`, фокус на `<legend>` группы (для «Odebrane» группа разворачивается). Если api вернул список id в `details`, метки подставляются в `{list}`; иначе `{list}` опускается (ключ без хвоста — `…Generic`).
+
+| Код | Где | Ключ | PL | EN |
+|---|---|---|---|---|
+| 422 `USER_PERMISSION_NOT_GRANTABLE` | под «Dodatkowe» | `users.permissions.errors.notGrantable` | Tych uprawnień nie można nadać roli {role}: {list}. Odśwież formularz i spróbuj ponownie. | These permissions can't be granted to the {role} role: {list}. Reload the form and try again. |
+| — без `details` | | `users.permissions.errors.notGrantableGeneric` | Część uprawnień nie może być nadana roli {role}. Odśwież formularz i spróbuj ponownie. | Some permissions can't be granted to the {role} role. Reload the form and try again. |
+| 422 `USER_PERMISSION_NOT_REVOCABLE` | под «Odebrane» | `users.permissions.errors.notRevocable` | Tych uprawnień nie można odebrać roli {role}: {list}. | These permissions can't be removed from the {role} role: {list}. |
+| — без `details` | | `users.permissions.errors.notRevocableGeneric` | Części uprawnień nie można odebrać roli {role}. | Some permissions can't be removed from the {role} role. |
+| 400 (неизвестный id) / 5xx | тост | существующий `formatApiError` | — | — |
+
+Успех — существующий тост `common.saved`.
+
+#### A.10 Audit
+
+- В блоке — последней строкой `text-xs text-text-sub` `users.permissions.auditNote` (сразу после превью). Права пересчитываются на каждом запросе (docs/15), поэтому «od następnej akcji», а не «po ponownym zalogowaniu».
+- Журнал `/employee/audit`: `user.permissionsChanged` (before/after) и строки сброса при смене роли рендерятся существующим `<AuditRow>` с JSON-diff — UI-правок не требуется.
+
+#### A.11 Маркер в списке (опционально, не блокирует)
+
+`UsersListView`, колонка роли: при наличии исключений — вторым элементом `<Badge variant="muted" className="tabular-nums">` «+{extra} −{denied}» (нулевую часть не показывать: «+1», «−2», «+1 −2»), `title` + `aria-label` = `users.permissions.listMarkerAria`. Помогает admin найти «каким перевозчикам открыты документы».
+
+#### A.12 Метки прав — `permissions.labels.*` (конвенция)
+
+Ключ повторяет id права **вложенными объектами** по точкам (next-intl читает точку как вложенность): `vehicles.rates.read` → `"permissions": { "labels": { "vehicles": { "rates": { "read": "…" } } } }`, вызов `t(\`labels.${id}\`)` в namespace `permissions`. Конфликтов листа и ветки в каталоге нет (проверено на 45 id).
+
+| Правило | PL | EN |
+|---|---|---|
+| Форма | название действия (rzeczownik odczasownikowy) + объект в dopełniaczu | глагол в базовой форме + объект |
+| Регистр, пунктуация | только первая буква заглавная, без точки | sentence case, без точки |
+| Длина | ≤ 45 знаков | ≤ 45 chars |
+| Словарь | слова интерфейса: ciągnik, naczepa, kierowca, wniosek, wyjazd, przewoźnik, opiekun, przebieg. Никогда id, «endpoint», «scope», англицизмы | UI words: vehicle, trailer, driver, claim, trip, carrier, mileage |
+| `.read` | Podgląd … | View … |
+| `.write` | Edycja … | Edit … |
+| `.add` | Dodawanie … | Upload / Add … |
+| `.delete` / `.hard_delete` | Usuwanie … / Trwałe usuwanie … | Delete … / Permanently delete … |
+| `.manage` | Zarządzanie … | Manage … |
+| `.verify` / `.submit` | Weryfikacja … / Składanie … | Verify … / Submit … |
+| `panel.<rola>` | Panel {rola w dopełniaczu} | {Role} panel |
+| Уточнение | одна скобка в конце, если без неё метки двух прав совпадут | same |
+
+Готовые метки (остальные 33 web-agent заполняет по конвенции):
+
+| Id | PL | EN |
+|---|---|---|
+| `carrier_documents.read` | Podgląd dokumentów firmy i floty | View company and fleet documents |
+| `carrier_documents.add` | Dodawanie dokumentów firmy | Upload company documents |
+| `carrier_documents.delete` | Usuwanie dokumentów firmy | Delete company documents |
+| `claims.read` | Podgląd wniosków | View claims |
+| `claims.verify` | Weryfikacja wniosków | Verify claims |
+| `claims.verify_pending_authorization` | Weryfikacja wniosków czekających na autoryzację | Verify claims awaiting authorisation |
+| `dashboard.read` | Podgląd pulpitu | View dashboard |
+| `vehicles.rates.read` | Podgląd stawek ciągnika | View vehicle rates |
+| `vehicles.fuel_card.read` | Podgląd karty paliwowej | View fuel card |
+| `fleet.write` | Edycja floty (ciągniki, kierowcy, naczepy) | Edit fleet (vehicles, drivers, trailers) |
+| `km.verify` | Weryfikacja przebiegu dziennego | Verify daily mileage |
+| `panel.opiekun` | Panel opiekuna | Carrier-success manager panel |
+
+#### A.13 i18n-контракт (PL default + EN)
+
+| Ключ | PL | EN |
+|---|---|---|
+| `users.permissions.title` | Uprawnienia indywidualne | Individual permissions |
+| `users.permissions.description` | Wyjątki od roli dla tego konta. Rola nadal decyduje o panelu i zakresie danych. | Exceptions to the role for this account. The role still decides the panel and the data scope. |
+| `users.permissions.magspaceHint` | Synchronizacja z MAGSpace nie zmienia tych ustawień. Jeśli zmieni rolę konta, niepasujące wyjątki zostaną usunięte. | MAGSpace sync doesn't change these settings. If it changes the account's role, exceptions that no longer fit are removed. |
+| `users.permissions.empty` | Brak wyjątków — konto ma dokładnie uprawnienia roli {role}. | No exceptions — the account has exactly the {role} role's permissions. |
+| `users.permissions.extra.title` | Dodatkowe | Added |
+| `users.permissions.extra.hint` | Uprawnienia ponad rolę {role}. | Permissions on top of the {role} role. |
+| `users.permissions.extra.autoAdded` | Zaznaczono również: {list} — jest wymagane. | Also ticked: {list} — it's required. |
+| `users.permissions.extra.autoRemoved` | Odznaczono również: {list} — bez odznaczonego uprawnienia nie działa. | Also cleared: {list} — it doesn't work without the cleared permission. |
+| `users.permissions.denied.title` | Odebrane | Removed |
+| `users.permissions.denied.hint` | Zaznacz uprawnienia roli, których ten użytkownik ma nie mieć. | Tick the role permissions this user should not have. |
+| `users.permissions.denied.summary` | {count, plural, =0 {Nic nie odebrano} one {Odebrano # uprawnienie} few {Odebrano # uprawnienia} many {Odebrano # uprawnień} other {Odebrano # uprawnienia}} | {count, plural, =0 {Nothing removed} one {# permission removed} other {# permissions removed}} |
+| `users.permissions.denied.toggleShow` | Pokaż uprawnienia roli ({count}) | Show role permissions ({count}) |
+| `users.permissions.denied.toggleHide` | Ukryj uprawnienia roli | Hide role permissions |
+| `users.permissions.denied.dependentsHint` | Bez tego uprawnienia nie zadziała: {list}. | Without it, these won't work: {list}. |
+| `users.permissions.denied.dependentsApply` | Odbierz również | Remove these too |
+| `users.permissions.effective.title` | Uprawnienia efektywne | Effective permissions |
+| `users.permissions.effective.hint` | Tak będzie po zapisaniu: rola + dodatkowe − odebrane. | After saving: role + added − removed. |
+| `users.permissions.effective.count` | {count, plural, one {# uprawnienie} few {# uprawnienia} many {# uprawnień} other {# uprawnienia}} | {count, plural, one {# permission} other {# permissions}} |
+| `users.permissions.effective.extraAria` | dodatkowe | added |
+| `users.permissions.effective.none` | Brak uprawnień — użytkownik zobaczy pusty panel. | No permissions — the user will see an empty panel. |
+| `users.permissions.drop.title` | Po zapisaniu zostaną usunięte — nie pasują do nowej roli: | Will be removed on save — they don't fit the new role: |
+| `users.permissions.drop.extraTag` | dodatkowe | added |
+| `users.permissions.drop.deniedTag` | odebrane | removed |
+| `users.permissions.auditNote` | Zmiana działa od następnej akcji użytkownika i trafia do audytu. | Takes effect from the user's next action and is recorded in the audit log. |
+| `users.permissions.listMarkerAria` | Uprawnienia indywidualne: dodatkowe {extra}, odebrane {denied} | Individual permissions: {extra} added, {denied} removed |
+| `users.permissions.errors.*` | см. A.9 | see A.9 |
+| `users.fields.carrierLocked` | Zablokowane — konto przewoźnika ma stałą rolę i jest zarządzane lokalnie. | Locked — a carrier account has a fixed role and is managed locally. |
+| `permissions.liderSuffix` | (lider) | (lead) |
+| `permissions.groups.*` | см. A.5 | see A.5 |
+| `permissions.labels.*` | см. A.12 | see A.12 |
+
+`{role}` — `tRoles(effectiveRole)`; `{list}` — метки через «, » (`Intl.ListFormat` с `type: 'conjunction'` даёт «i» / "and" перед последней — допустимо).
+
+#### A.14 a11y
+
+- `<fieldset>` + `<legend>` на «Dodatkowe» и «Odebrane»; описание группы через `aria-describedby`.
+- Раскрытие «Odebrane» — `aria-expanded` + `aria-controls` на кнопке; фокус при раскрытии не переносится.
+- Автодействия (A.3) и счётчик превью — `aria-live="polite"`; подсказка о зависимых — **не** live (появляется прямо под чекбоксом, который пользователь только что отметил; связать `aria-describedby` с этим чекбоксом).
+- Кнопка «Odbierz również» ≥ 44px на мобильных (`max-sm:min-h-11`).
+- Контрасты: `text-text-sub` на `bg-input` (notice A.7) 4.6:1 / 6.4:1 ✔; `success`-badge — существующий AA-рецепт `Badge`.
+
+#### A.15 Файлы для web-agent
+
+| Файл | Что |
+|---|---|
+| `app/(employee)/employee/(admin)/users/UserSheet.tsx` | монтирует блок в режиме правки; режим строки перевозчика (A.8: убрать приведение `przewoznik → pracownik`, статичный `<dl>` + `LockNotice`, не слать role/lider/liderId/managedBy/roleOverride); 422 из A.9 в `form.setError` по группам; поля формы `extraPermissions` / `deniedPermissions`, PATCH только при изменении |
+| `app/(employee)/employee/(admin)/users/UserPermissionsBlock.tsx` (новый, композиция) | группы A.3/A.4, превью A.6, notice A.7, аудит-строка A.10 |
+| `lib/users/permissionOverrides.ts` (новый, чистые функции + тесты) | `effectivePreview`, `droppedOnRoleChange`, `applyExtraDependencies` (обе стороны), `dependentsOf` — по `GRANTABLE_EXTRA` / `DEPENDENT_PERMISSIONS` / `permissionsFor` из shared |
+| `lib/auth/permissionGroups.ts` (новый) | карта A.5 + тест полноты (каждый id → домен + PL/EN-метка) |
+| `lib/auth/permissions.ts` | реэкспорт `GRANTABLE_EXTRA`, `DEPENDENT_PERMISSIONS` с subpath `@magguarantee/shared/permissions` |
+| `app/(employee)/employee/(admin)/users/UsersListView.tsx` | опционально — маркер A.11 |
+| `messages/pl.json`, `messages/en.json` | ключи A.5, A.9, A.12, A.13 |
+
 ### Role-guarded navigation (реализация)
 
 Зафиксировано в Phase 2 spec (раздел «Role-gated navigation»), Phase 4 — реализация:
@@ -1080,9 +1320,119 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 | Tab item (active) | `text-brand border-brand` (no fill — only red underline + red text) |
 | Tab item (with badge count) | append `<span class="ml-2 rounded-full bg-brand/10 dark:bg-brand/20 text-brand text-xs px-2 py-0.5">N</span>` |
 
-**Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🗺️).
+**Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🗺️). *(2026-10-27: current full set is `Wnioski` / `Nowy` / `Flota` / `Wyjazdy` / `Porozumienie` / `Przebieg`, plus the per-user `Dokumenty` as the last tab — see «Carrier «Dokumenty» tab» below.)*
 
 **Flota — unified panel.** See the «Carrier fleet panel (unified, planista-style)» section below. (Historical: the Flota area was three route-based sub-tabs `Auta` / `Kierowcy` / `Naczepy` rendered as a `<FleetSubTabs>` route-tablist over three sparse `/carrier/fleet/{vehicles,drivers,trailers}` pages — **superseded 2026-06-26** by one full-width page with in-page `<Tabs>` + a KPI strip. The carrier fleet stays strictly READ-ONLY.)
+
+### Carrier «Dokumenty» tab — `/carrier/dokumenty` (docs/25 B6, NEW 2026-10-27 — AUTHORITATIVE)
+
+> **Changelog.**
+> - 2026-10-27 — первая версия: первый реальный случай B6 (docs/25 §3 B6, решение 2026-10-23). Затронуты: `CarrierTabs` (условная вкладка), новая страница, `CarrierDocumentsTab` (переезд в `components/documents/` + гейты по правам), 5 новых ключей. Токенов 0, новых типов компонентов 0 — всё из §5R (Opiekun «Dokumenty»).
+
+> **Scope.** Перевозчик, которому admin точечно выдал `carrier_documents.read` (и, возможно, `.add`), видит документы своей фирмы **так же, как opiekun** на вкладке «Dokumenty» (§5R): каталог типов документов фирмы + обзор документов флота. Может **только загружать** новые файлы фирмы — не удалять, не заменять, не править даты. Вид opiekun **не меняется ни на пиксель**.
+
+#### B.1 Видимость и гейты
+
+| Что | Условие (по **эффективным** правам `/auth/me`, `effectivePermissionsOf(user)`) |
+|---|---|
+| Вкладка в `CarrierTabs` | `panel.carrier` **и** `carrier_documents.read`. `panel.carrier` отсекает admin в carrier-shell (у admin есть `carrier_documents.read` по роли, но нет своей фирмы) |
+| Страница `/carrier/dokumenty` | то же условие на сервере (`requirePermission` дважды или all-of); нет права → `redirect('/carrier/claims')` — политика проекта «redirect, а не экран 403» (`requireRoleAccess`) |
+| Edge | **Не** добавлять `/carrier/dokumenty` в `PATH_PERMISSIONS`: edge не знает overrides (docs/25 R3) и отбил бы каждого, кому право выдано. Префикс `/carrier` уже открыт роли `przewoznik`; точная проверка — на странице |
+| Загрузка (футер Sheet типа фирмы) | `carrier_documents.add` |
+| Удаление (колонка «Usuń» + confirm) | `carrier_documents.delete` — перевозчику не выдаётся никогда, поэтому у него кнопки нет |
+| Указатель «Zarządzaj w oknie …» у типов флота | `fleet.write`; без него — строка B.4 |
+
+Все три гейта внутри компонента — **по правам, не по роли и не по «аудитории»**. У opiekun и admin есть `.add`, `.delete`, `fleet.write` → рендер идентичен сегодняшнему (регрессионный тест на это обязателен).
+
+Право отозвали посреди сессии: вкладка пропадает при следующем обновлении `/auth/me`; открытая страница получает 403 на запросах и показывает существующий `<ErrorState>` (`queryErrorProps`) — отдельного состояния не нужно.
+
+#### B.2 Позиция вкладки
+
+**Последней**, после «Przebieg»: `Wnioski / Nowy / Flota / Wyjazdy / Porozumienie / Przebieg / Dokumenty`, эмодзи **📁**, `labelKey: 'documents'` (`carrier.tabs.documents`).
+
+Почему в конце, а не рядом с «Flota»: вкладка есть не у всех перевозчиков. Условная вкладка в середине сдвигала бы «Wyjazdy» / «Porozumienie» / «Przebieg» у одних перевозчиков и не у других — инструкции поддержки («trzecia zakładka…») и мышечная память разъехались бы. В конце она ничего не сдвигает. Документы — справочный раздел, к нему ходят реже всего.
+
+Без бейджа-счётчика. Клик по активной вкладке = рефреш (§14) — работает автоматически через общий `useActiveNavRefresh`.
+
+#### B.3 Страница
+
+Контейнер — как у carrier fleet panel (каталог карточек в 3 колонки на `xl` выигрывает от ширины): `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8 space-y-6`.
+
+```
+Dokumenty                                                     ← h1
+Dokumenty Twojej firmy i floty. Do dokumentów firmy możesz    ← подзаголовок (subtitleAdd | subtitleRead)
+dodawać nowe pliki.
+
+DOKUMENTY FIRMOWE
+[Ubezpieczenie/OCP  2 pliki  ›] [Licencja  Brak plików ›] [KREPTD …] 
+[Inne …]
+DOKUMENTY CIĄGNIKÓW
+[Umowa GPS …] [Porozumienie …] [Ubezpieczenie kabotażowe DE …]
+ADR CIĄGNIKÓW
+[ADR card — plates + classes, display only]
+DOKUMENTY NACZEP
+[Certyfikat XL …]
+DOKUMENTY KIEROWCÓW
+[Świadectwo ADR kierowcy …]
+```
+
+- `h1` — `text-2xl font-extrabold tracking-tight text-text` `carrier.documents.title`.
+- Подзаголовок — `mt-1 text-sm text-text-sub`: `carrier.documents.subtitleAdd` при `.add`, иначе `carrier.documents.subtitleRead`.
+- Ниже — `<CarrierDocumentsTab carrierId={…} />` без обёрток: группы, карточки `<DocumentTypeCard>`, ADR-карточка, `<DocumentTypeSheet>`, skeleton и error-state — ровно §5R.1–§5R.5. Шапки-карточки фирмы (как на странице opiekun) нет: перевозчик знает, чья это фирма.
+
+#### B.4 Отличия от вида opiekun (только они)
+
+| Место | opiekun / admin | Перевозчик с `.read` + `.add` | Перевозчик только с `.read` |
+|---|---|---|---|
+| Sheet типа фирмы — таблица файлов | Pobierz + Usuń | **только Pobierz** (колонка «Akcje» остаётся — в ней одна кнопка) | только Pobierz |
+| Sheet типа фирмы — футер | подсказка `sheet.uploadHint` + `FileUpload compact` + «Prześlij» | подсказка **`sheet.uploadHintAddOnly`** + тот же `FileUpload` + «Prześlij» | вместо загрузки — строка `text-xs text-text-sub` **`sheet.companyByOpiekun`** (как указатель у типов флота) |
+| Sheet типа флота — футер | `sheet.manageInVehicle/Trailer/Driver` | **`sheet.fleetByOpiekun`** (одна строка на все три типа) | то же |
+| Confirm удаления | есть | не монтируется | не монтируется |
+
+Формулировка «только загрузка» — одна, в подсказке над `FileUpload` (`uploadHintAddOnly`): «можно добавить, нельзя удалить или заменить, при ошибке — к опекуну». Отдельного confirm перед загрузкой **нет**: файл виден в `FileUpload` до нажатия «Prześlij», подсказка стоит рядом с кнопкой; лишний диалог на каждую загрузку — трение без пользы (opiekun может удалить ошибочный файл). Дат для правки на этой поверхности нет и у opiekun (колонка «Data przesłania» — read-only метка загрузки), поэтому про даты в UI не пишем ничего — нечего запрещать.
+
+#### B.5 Обзор флота у перевозчика
+
+- Всё read-only, как у opiekun: типы «Umowa GPS», «Porozumienie», «Ubezpieczenie kabotażowe DE», «Certyfikat XL», «Świadectwo ADR kierowcy» → Sheet со списком файлов и кнопкой «Pobierz»; ADR-карточка — без кликов.
+- Скачивание — существующими маршрутами вложений машины / прицепа / водителя (`downloadVehicleAttachment` / `downloadTrailerAttachment` / `downloadDriverAttachment`), которые перевозчик уже проходит по роли (`vehicles.read` / `trailers.read` / `drivers.read` + владение). Если какое-то из этих прав у перевозчика отозвано (`deniedPermissions`), скачивание падает на существующий тост `downloadError` — отдельной обработки не нужно.
+- В колонке сущности — **номер рег. (`registration`) / ФИО**, никогда `NR BOCZNY` (правило 2026-07-07: внутреннее обозначение MAGTRANS на поверхностях перевозчика не показывается). Overview DTO боковой номер и не несёт — проверить, что так и останется.
+
+#### B.6 Пустые состояния
+
+Как §5R.5: пустых экранов нет — карточки всегда на месте с нейтральной строкой «Brak plików»; Sheet пустого типа — существующий `<EmptyState>` (`empty.title` / `empty.message`), у перевозчика с `.add` под ним футер загрузки. ADR без машин — «Brak ciągników ADR». Ничего не окрашивается в warning (правило §5R: «no warnings anywhere»).
+
+#### B.7 Мобильная раскладка
+
+- Вкладки: существующий горизонтальный скролл `CarrierTabs`; на 360px «Dokumenty» за краем — так же, как сегодня «Przebieg». Если web-agent добавит `scrollIntoView({ inline: 'nearest' })` активной вкладке при монтировании — для всех вкладок сразу, не только для этой.
+- Карточки — 1 колонка (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-3`, §5R.6). Sheet — во всю ширину (`w-full`, как сейчас). Футер загрузки — `flex-col items-stretch` ниже `sm` (уже так), «Prześlij» во всю ширину.
+- Кнопка «Pobierz» в строке таблицы ниже `lg` — только иконка (уже так) → добавить `max-sm:min-h-11 max-sm:min-w-11` ради цели касания 44px. Это меняет только рендер ниже `sm` и одинаково для всех ролей; на `sm+` вид opiekun не меняется.
+
+#### B.8 i18n (PL default + EN)
+
+| Ключ | PL | EN |
+|---|---|---|
+| `carrier.tabs.documents` | Dokumenty | Documents |
+| `carrier.documents.title` | Dokumenty | Documents |
+| `carrier.documents.subtitleAdd` | Dokumenty Twojej firmy i floty. Do dokumentów firmy możesz dodawać nowe pliki. | Your company and fleet documents. You can add new files to company documents. |
+| `carrier.documents.subtitleRead` | Dokumenty Twojej firmy i floty — tylko do podglądu. | Your company and fleet documents — view only. |
+| `opieka.documents.sheet.uploadHintAddOnly` | Możesz dodać nowy plik. Dodanego pliku nie można usunąć ani zastąpić — w razie pomyłki skontaktuj się ze swoim opiekunem. | You can add a new file. Added files can't be deleted or replaced — if you make a mistake, contact your manager. |
+| `opieka.documents.sheet.companyByOpiekun` | Dokumenty firmy dodaje Twój opiekun. | Your manager adds company documents. |
+| `opieka.documents.sheet.fleetByOpiekun` | Dokumenty floty uzupełnia Twój opiekun. | Your manager keeps fleet documents up to date. |
+
+Остальное — существующий namespace `opieka.documents.*` (§5R.7) без изменений: компонент один, словарь один.
+
+#### B.9 Файлы для web-agent
+
+| Файл | Что |
+|---|---|
+| `app/(employee)/employee/opieka/carriers/[login]/CarrierDocumentsTab.tsx` → **`components/documents/CarrierDocumentsTab.tsx`** | переезд (компонент теперь общий для двух route-групп; импорт из `app/(employee)/…` в `app/(carrier)/…` — запах). Гейты B.1 по `effectivePermissionsOf(user)`: футер загрузки ⇔ `.add`, кнопка/confirm удаления ⇔ `.delete`, указатель флота ⇔ `fleet.write`; ключи B.8 |
+| `app/(employee)/employee/opieka/carriers/[login]/page.tsx` | только новый путь импорта |
+| `app/(carrier)/carrier/dokumenty/page.tsx` (новый) | серверный гейт B.1 + клиентская часть B.3 |
+| `components/carrier/CarrierTabs.tsx` | вкладка B.2, фильтр по правам (B.1); `labelKey` union + `'documents'` |
+| `messages/pl.json`, `messages/en.json` | ключи B.8 |
+| тесты | (1) opiekun/admin — рендер `CarrierDocumentsTab` без изменений (есть «Usuń», футер загрузки, «Zarządzaj w oknie …»); (2) перевозчик с `.read`+`.add` — нет «Usuń», есть загрузка с `uploadHintAddOnly`, `fleetByOpiekun`; (3) только `.read` — нет загрузки, `companyByOpiekun`; (4) `CarrierTabs` — вкладка только при `panel.carrier` ∧ `.read`, последней |
+
+Зависимость, не дизайн: перевозчику нужен `carrierId` своей фирмы для `useCarrierDocumentsOverview(carrierId)` и upload/download-маршрутов `/carriers/:id/…`; сегодня `UserDto` его не несёт. Источник (поле в `/auth/me` или иной) — решение api-agent/web-agent; на вид не влияет.
 
 ### Carrier fleet panel (unified, planista-style) — `/carrier/fleet`
 
@@ -6609,6 +6959,8 @@ text-sub/success/danger` tokens, the §Phase 1 form-input + `<CodeBox>` recipes.
 ---
 
 ## Phase 5-rework — Opiekun «Dokumenty» tab as a fleet-wide document-type catalog
+
+> **2026-10-27 — reused on the carrier side.** The same component now also renders on `/carrier/dokumenty` for a carrier holding `carrier_documents.read` (per-user grant, docs/25 B6), with upload / delete / fleet-pointer gated by permissions; it moves to `components/documents/CarrierDocumentsTab.tsx`. The opiekun rendering below is unchanged. See «Carrier «Dokumenty» tab» in the Phase 3 carrier section.
 
 > **Scope.** Full redesign of the **«Dokumenty»** tab inside the opiekun carrier drill-down
 > (`/employee/opieka/carriers/[login]` → tab `documents`, component

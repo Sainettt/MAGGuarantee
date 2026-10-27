@@ -1,0 +1,49 @@
+-- Per-user permission overrides (docs/25 §3 B6, step 1 — approved 2026-10-27).
+--
+-- Until now a user's rights were a pure function of `(role, lider)`
+-- (`permissionsFor` in packages/shared). B6 lets an admin adjust them per
+-- person, in both directions. The first real case: one chosen carrier sees and
+-- uploads (but does not delete) his firm's documents, i.e. gets
+-- `carrier_documents.read` + `carrier_documents.add` on top of `przewoznik`.
+--
+-- Two columns on "users":
+--   * `extraPermissions`  - rights granted ON TOP of `permissionsFor(role, lider)`.
+--                           Only values in `GRANTABLE_EXTRA[role]` (shared
+--                           catalog) are honoured. The api filters on write
+--                           (422) AND on read, so an unknown or non-grantable
+--                           string is inert.
+--   * `deniedPermissions` - rights REMOVED from `permissionsFor(role, lider)`.
+--                           A value outside the role's base set is inert.
+--                           Admin rows never carry any (api 422).
+-- Effective rights, computed by the api on every request (JwtAccessStrategy):
+--   (permissionsFor(role, lider) ∪ extraPermissions) − deniedPermissions
+-- Denial wins over grant.
+--
+-- Ownership: admin only (UserSheet / `PATCH /users/:id`), editable on
+-- `managedBy = 'magspace'` rows too. The directory reconcile, the sign-in sync
+-- and grantAccess never SET these columns. But whenever `role` or `lider`
+-- changes (by an admin or by the directory), the entries that no longer fit the
+-- new pair are pruned, with an audit row.
+--
+-- Deliberately NO CHECK against the permission catalog. The catalog lives in
+-- code (packages/shared `PERMISSIONS` / `GRANTABLE_EXTRA`) and changes without
+-- a migration. A key removed from it later just becomes inert on read, it does
+-- not break the row. Values are opaque text keys such as
+-- 'carrier_documents.read'.
+--
+-- DDL: identical to `prisma migrate diff` for `String[] @default([])` plus
+-- `NOT NULL`, which Prisma never emits for list columns. Prisma does not
+-- compare nullability of array columns, so `migrate diff` against the schema
+-- stays empty. NOT NULL keeps the guarantee the generated client already
+-- types (`string[]`, never null), so the api never has to handle NULL.
+-- `ARRAY[]::TEXT[]` is a constant default, so on PG 11+ the ADD COLUMN is a
+-- metadata-only change (no table rewrite).
+--
+-- Forward-only and fully additive: nothing is dropped, renamed or backfilled.
+-- Every existing row gets `{}` in both columns, so effective rights stay exactly
+-- `permissionsFor(role, lider)` and no behaviour changes until the api reads
+-- the columns.
+
+-- AlterTable
+ALTER TABLE "users" ADD COLUMN     "deniedPermissions" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN     "extraPermissions" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
