@@ -883,6 +883,136 @@ describe('ClaimsService.submit — delegation link', () => {
     expect(repoFake.creates).toHaveLength(1);
   });
 
+  // UWAGI #29 — the floor is the WARSAW day of the true-UTC `departureAt`
+  // (docs/19 #16), not its raw UTC day. A departure declared just after
+  // midnight Warsaw time still sits on the PREVIOUS UTC day, so a raw-UTC
+  // floor came out one day early and let the carrier declare a loading date
+  // before the day it said it would leave. Expectations are literals on purpose.
+
+  /** Service wired to an outing with the given anchors. */
+  function departureService(
+    repoFake: RepoFake,
+    delegOverrides: Partial<DelegationRow>,
+  ): ClaimsService {
+    return makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeDelegationsRepo(makeDelegation(delegOverrides)),
+    );
+  }
+
+  async function catchSubmit(
+    svc: ClaimsService,
+    overrides: Partial<SubmitClaimDto>,
+  ): Promise<unknown> {
+    try {
+      await svc.submit(makeAuth('przewoznik'), submitDto(overrides));
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  }
+
+  // 2026-04-30T22:30Z = 01.05 00:30 Warsaw (CEST, UTC+2).
+  const CEST_AFTER_MIDNIGHT = new Date('2026-04-30T22:30:00.000Z');
+
+  it('UWAGI #29 CEST: a 00:30 Warsaw departure floors on the Warsaw day — the UTC day before is 422', async () => {
+    const repoFake = makeRepo(null);
+    const svc = departureService(repoFake, {
+      departureAt: CEST_AFTER_MIDNIGHT,
+    });
+
+    const v = readViolation(
+      await catchSubmit(svc, { dateStart: '2026-04-30' }),
+    );
+    expect(v).not.toBeNull();
+    expect(v!.extensions?.code).toBe('CLAIM_DATE_BEFORE_DEPARTURE');
+    expect(v!.extensions?.minDateStart).toBe('2026-05-01');
+    // The Polish message quotes the same (Warsaw) floor, not the UTC day.
+    expect(v!.violations).toHaveLength(1);
+    expect(v!.violations[0]).toContain('data wyjazdu (2026-05-01)');
+    expect(v!.violations[0]).not.toContain('data wyjazdu (2026-04-30)');
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('UWAGI #29 CEST: a dateStart on the Warsaw departure day is accepted (boundary inclusive)', async () => {
+    const repoFake = makeRepo(null);
+    const svc = departureService(repoFake, {
+      departureAt: CEST_AFTER_MIDNIGHT,
+    });
+
+    await svc.submit(
+      makeAuth('przewoznik'),
+      submitDto({ dateStart: '2026-05-01' }),
+    );
+    expect(repoFake.creates).toHaveLength(1);
+  });
+
+  describe('UWAGI #29 CET (winter offset)', () => {
+    // 2026-01-14T23:30Z = 15.01 00:30 Warsaw (CET, UTC+1). The clock moves to
+    // 26.01 so the 7-day deadline from the 24.01 return stays open.
+    const CET_NOW = new Date('2026-01-26T10:00:00.000Z');
+    const cetOuting: Partial<DelegationRow> = {
+      departureAt: new Date('2026-01-14T23:30:00.000Z'),
+      actualReturnAt: new Date('2026-01-24T00:00:00.000Z'),
+      plannedReturnAt: new Date('2026-01-24T00:00:00.000Z'),
+    };
+
+    beforeEach(() => {
+      jest.setSystemTime(CET_NOW);
+    });
+    afterEach(() => {
+      // Restore the suite's anchor so subsequent tests aren't affected.
+      jest.setSystemTime(NOW);
+    });
+
+    it('a 00:30 Warsaw departure floors on the Warsaw day — the UTC day before is 422', async () => {
+      const repoFake = makeRepo(null);
+      const svc = departureService(repoFake, cetOuting);
+
+      const v = readViolation(
+        await catchSubmit(svc, {
+          dateStart: '2026-01-14',
+          dateEnd: '2026-01-24',
+        }),
+      );
+      expect(v).not.toBeNull();
+      expect(v!.extensions?.code).toBe('CLAIM_DATE_BEFORE_DEPARTURE');
+      expect(v!.extensions?.minDateStart).toBe('2026-01-15');
+      expect(v!.violations[0]).toContain('data wyjazdu (2026-01-15)');
+      expect(repoFake.creates).toHaveLength(0);
+    });
+
+    it('a dateStart on the Warsaw departure day is accepted (boundary inclusive)', async () => {
+      const repoFake = makeRepo(null);
+      const svc = departureService(repoFake, cetOuting);
+
+      await svc.submit(
+        makeAuth('przewoznik'),
+        submitDto({ dateStart: '2026-01-15', dateEnd: '2026-01-24' }),
+      );
+      expect(repoFake.creates).toHaveLength(1);
+    });
+  });
+
+  it('UWAGI #29 control: a daytime departure (UTC day == Warsaw day) keeps its floor', async () => {
+    const repoFake = makeRepo(null);
+    const svc = departureService(repoFake, {
+      departureAt: new Date('2026-04-30T06:30:00.000Z'),
+    });
+
+    const v = readViolation(
+      await catchSubmit(svc, { dateStart: '2026-04-29' }),
+    );
+    expect(v).not.toBeNull();
+    expect(v!.extensions?.code).toBe('CLAIM_DATE_BEFORE_DEPARTURE');
+    expect(v!.extensions?.minDateStart).toBe('2026-04-30');
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
   // ── deadline anchor (REWORK 2026-07-30) ──────────────────
 
   it('measures the submission deadline from actualReturnAt, NOT from the declared dateEnd', async () => {

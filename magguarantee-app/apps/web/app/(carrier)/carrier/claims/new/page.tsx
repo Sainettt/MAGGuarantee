@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  businessDateIso,
   canSubmitByDuration,
   checkClaimDates,
   DEFAULTS as SUBMISSION_DEFAULTS,
@@ -261,8 +262,15 @@ export default function NewClaimPage() {
   // Floor for the declared loading date — the departure the carrier reported
   // when registering the outing. Mirrors the api's `CLAIM_DATE_BEFORE_DEPARTURE`
   // gate so the browser blocks it before the round-trip.
+  //
+  // `departureAt` is a TRUE UTC instant (docs/19 #16), so the floor is its
+  // WARSAW calendar day via `businessDateIso` — the same reduction the api
+  // applies (and echoes back as `extensions.minDateStart`), UWAGI #29. E.g.
+  // `2026-04-30T22:30:00.000Z` (= 01.05 00:30 CEST) floors at `2026-05-01`.
+  // This is NOT the raw-slice rule used for the wall-clock `actual*` values:
+  // slicing a true instant yields the UTC day, one day early after midnight.
   const minDateStart = selectedDelegation
-    ? selectedDelegation.departureAt.slice(0, 10)
+    ? businessDateIso(new Date(selectedDelegation.departureAt))
     : undefined;
   const dateStartBelowFloor =
     !!minDateStart && !!watched.dateStart && watched.dateStart < minDateStart;

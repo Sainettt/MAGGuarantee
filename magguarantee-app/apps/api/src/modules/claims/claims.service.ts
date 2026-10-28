@@ -58,6 +58,7 @@ import {
   requiresMaksimConfirmation,
   settleClaim,
   settlementNeedsBoard,
+  startOfBusinessDayUtc,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
@@ -519,11 +520,13 @@ export class ClaimsService {
    *   - the STATUS gate — only `zjechal` may back a wniosek (unchanged: the
    *     trip must be over before money is claimed for it);
    *   - `declaredDepartureDay` — the day the carrier said it would leave, i.e.
-   *     the FLOOR for the carrier-declared `dateStart`;
+   *     the FLOOR for the carrier-declared `dateStart`. `departureAt` is a TRUE
+   *     UTC instant, so this is its WARSAW day (docs/19 #16, UWAGI #29);
    *   - `actualReturnDay` — the weryfikator's recorded return, i.e. the anchor
    *     for the submission DEADLINE. Deliberately NOT the carrier's `dateEnd`:
    *     that one is carrier-typed, so anchoring the deadline on it would let a
-   *     late carrier type a fresher date and walk past the cut-off.
+   *     late carrier type a fresher date and walk past the cut-off. Raw UTC day:
+   *     `actualReturnAt` is wall-clock labelled UTC, `plannedReturnAt` date-only.
    *
    * The `?? departureAt` / `?? plannedReturnAt` fallbacks are defensive (a
    * `zjechal` outing always carries both actual datetimes) — they keep a
@@ -539,7 +542,7 @@ export class ClaimsService {
       );
     }
     return {
-      declaredDepartureDay: startOfUtcDay(deleg.departureAt),
+      declaredDepartureDay: startOfBusinessDayUtc(deleg.departureAt),
       actualReturnDay: startOfUtcDay(
         deleg.actualReturnAt ?? deleg.plannedReturnAt,
       ),
@@ -4419,10 +4422,12 @@ function toIsoDateOnly(d: Date): string {
 }
 
 /**
- * Truncate any `Date` to UTC midnight of its calendar day. Used to derive a
- * claim period boundary from a delegation timestamp (`departureAt` carries a
- * time; `plannedReturnAt`/`actualReturnAt` are already date-only but we
- * normalise defensively).
+ * Truncate a `Date` to UTC midnight of its RAW UTC calendar day. Only for
+ * values whose UTC date part already IS the business date (docs/19 #16): the
+ * wall-clock-labelled `actualDepartureAt` / `actualReturnAt` and the date-only
+ * `plannedReturnAt` / stored claim `dateStart` / `dateEnd`. Never for a TRUE
+ * instant such as `departureAt` — a just-after-midnight Warsaw time sits on the
+ * previous UTC day; those go through `startOfBusinessDayUtc` (UWAGI #29).
  */
 function startOfUtcDay(d: Date): Date {
   return new Date(
