@@ -10,16 +10,20 @@
 //   - enabled=false short-circuit;
 //   - stamp claim/release on mail failure + the compensation handler, the
 //     no-opiekun violation semantics (2026-08-14 logging audit, item 6);
-//   - per-vehicle isolation and the guarded cron body (item 20).
+//   - per-vehicle isolation and the guarded cron body (item 20);
+//   - process-zone independence of anchor / deadline (UWAGI #31).
 //
 // Working-day anchors are derived the SAME way as the SLA spec — from the
 // shared `addPolishWorkingDays` / `isPolishWorkingDay` engine — so the fixtures
-// stay in lockstep with `computeGuaranteeWatchdog`.
+// stay in lockstep with `computeGuaranteeWatchdog`. Every fixture and expected
+// date is in the PRODUCTION shape — UTC midnight of the calendar day — so the
+// suite holds under `TZ=UTC` and `TZ=Europe/Warsaw` alike (UWAGI #31).
 
 import { Logger } from '@nestjs/common';
 
 import {
   addPolishWorkingDays,
+  computeGuaranteeWatchdog,
   isPolishWorkingDay,
 } from '@magguarantee/shared';
 
@@ -42,32 +46,72 @@ import type {
 } from './guarantee-watchdog.repository';
 import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
+// The UWAGI #31 tests observe what the service hands the engine. The shared
+// dist re-exports through non-configurable getters, so `jest.spyOn` cannot
+// wrap it; a pass-through `jest.fn` around the REAL engine stands in instead.
+// Every other export (incl. the working-day helpers above) is the real one.
+jest.mock('@magguarantee/shared', () => {
+  const actual = jest.requireActual<typeof import('@magguarantee/shared')>(
+    '@magguarantee/shared',
+  );
+  return {
+    __esModule: true,
+    ...actual,
+    computeGuaranteeWatchdog: jest.fn(actual.computeGuaranteeWatchdog),
+  };
+});
+
 // A stable weekday well clear of Polish holidays (Wed 2026-06-10, same as the
 // SLA spec) so the working-day arithmetic never straddles a holiday cluster.
-const NOW = new Date(2026, 5, 10);
+// UTC midnight, like `startOfBusinessTodayUtc` (which the service applies).
+const NOW = new Date(Date.UTC(2026, 5, 10));
 const DEADLINE_WORKING_DAYS = 10;
 const REMINDER_OFFSETS = [3, 1];
 
-/** Walk `n` Polish working days backward (anchor day excluded). */
+/** Local midnight of `d`'s UTC calendar date — the engine's working shape. */
+function localMidnightOfUtcDay(d: Date): Date {
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * UTC midnight of `d`'s LOCAL calendar date — the same formula as the
+ * service's re-encoding of the engine output (UWAGI #31).
+ */
+function utcMidnightOfLocalDay(d: Date): Date {
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+/** The engine's `addPolishWorkingDays` over UTC-midnight dates (anchor day excluded). */
+function addPolishWorkingDaysUtc(date: Date, n: number): Date {
+  return utcMidnightOfLocalDay(
+    addPolishWorkingDays(localMidnightOfUtcDay(date), n),
+  );
+}
+
+/**
+ * Walk `n` Polish working days backward over UTC-midnight dates (anchor day
+ * excluded). The walk runs on local midnights through the engine's
+ * `isPolishWorkingDay`; only the result is re-encoded.
+ */
 function subtractPolishWorkingDays(date: Date, n: number): Date {
-  const cursor = new Date(date);
+  const cursor = localMidnightOfUtcDay(date);
   let remaining = n;
   while (remaining > 0) {
     cursor.setDate(cursor.getDate() - 1);
     if (isPolishWorkingDay(cursor)) remaining -= 1;
   }
-  return cursor;
+  return utcMidnightOfLocalDay(cursor);
 }
 
 /**
- * An anchor date whose `computeGuaranteeWatchdog({today: NOW}).daysLeft === k`.
- * deadline = anchor + 10 working days; daysLeft = workingDaysBetween(NOW,
+ * An anchor date (UTC midnight) whose service-computed `daysLeft` at `NOW` is
+ * `k`. deadline = anchor + 10 working days; daysLeft = workingDaysBetween(NOW,
  * deadline). Invert: deadline = NOW ± k working days; anchor = deadline − 10.
  */
 function anchorForDaysLeft(k: number): Date {
   const deadline =
     k >= 0
-      ? addPolishWorkingDays(NOW, k)
+      ? addPolishWorkingDaysUtc(NOW, k)
       : subtractPolishWorkingDays(NOW, -k);
   return subtractPolishWorkingDays(deadline, DEADLINE_WORKING_DAYS);
 }
@@ -105,7 +149,10 @@ function makeEpisode(
     carrierId: 'car-1',
     anchorAt: anchorForDaysLeft(1),
     anchorSource: 'zjechal',
-    deadlineAt: addPolishWorkingDays(anchorForDaysLeft(1), DEADLINE_WORKING_DAYS),
+    deadlineAt: addPolishWorkingDaysUtc(
+      anchorForDaysLeft(1),
+      DEADLINE_WORKING_DAYS,
+    ),
     state: 'warning',
     reminder3SentAt: null,
     reminder1SentAt: null,
@@ -413,10 +460,10 @@ describe('GuaranteeWatchdogService.runDaily — flag copy on reopen', () => {
       vehicleId: 'veh-1',
       anchorAt: anchor,
       state: 'resolved',
-      reminder3SentAt: new Date(2026, 5, 5),
-      reminder1SentAt: new Date(2026, 5, 8),
+      reminder3SentAt: new Date(Date.UTC(2026, 5, 5)),
+      reminder1SentAt: new Date(Date.UTC(2026, 5, 8)),
       resolvedReason: 'wyjazd',
-      resolvedAt: new Date(2026, 5, 8),
+      resolvedAt: new Date(Date.UTC(2026, 5, 8)),
     });
     const h = makeHarness({
       scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchor })],
@@ -976,5 +1023,111 @@ describe('GuaranteeWatchdogService — carrier episode archive (listMyEpisodes)'
       Record<string, unknown>,
     ];
     expect(args.cursor).toBe('ep-b');
+  });
+});
+
+describe('GuaranteeWatchdogService — process-zone independence (UWAGI #31)', () => {
+  // `actualReturnAt` is a Warsaw wall-clock LABELLED UTC (docs/19 #16): a 23:30
+  // return is stored `…T23:30:00Z` and its raw UTC date part IS the business
+  // date. Without the fix the engine-input and `anchorAt` assertions fail on
+  // any process zone (the raw value goes through); on a Warsaw-zone process the
+  // anchor also lands on 03.06 / deadline 18.06, and an unconverted engine
+  // deadline reads `…T22:00:00.000Z` (the previous day).
+  const engine = jest.mocked(computeGuaranteeWatchdog);
+  const adminUser: AuthUser = makeAuthUser('admin', { sub: 'adm-1' });
+
+  /** 23:30 wall-clock on Tue 02.06.2026 (CEST, UTC+2). */
+  const RETURN_CEST = new Date('2026-06-02T23:30:00.000Z');
+  /** 23:30 wall-clock on Thu 29.01.2026 (CET, UTC+1). */
+  const RETURN_CET = new Date('2026-01-29T23:30:00.000Z');
+  /**
+   * Mon 15.06.2026. Deadline 17.06 = 10 Polish working days after 02.06 (Thu
+   * 04.06 is Boże Ciało, Easter 2026 = 05.04) → daysLeft 2: counting with the
+   * D-3 reminder due, so the cron writes an episode row. (At the suite's NOW,
+   * 10.06, daysLeft would be 5 and no row is recorded.)
+   */
+  const NOW_CEST = new Date(Date.UTC(2026, 5, 15));
+  /** Mon 09.02.2026. Deadline 12.02 = 29.01 + 10 working days → daysLeft 3. */
+  const NOW_CET = new Date(Date.UTC(2026, 1, 9));
+
+  beforeEach(() => {
+    engine.mockClear();
+  });
+
+  it('hands the engine the wall-clock DATE of a 23:30 CEST return (UTC midnight of 02.06)', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: RETURN_CEST })],
+    });
+
+    await h.service.runDaily(NOW_CEST);
+
+    expect(engine).toHaveBeenCalledTimes(1);
+    expect(engine.mock.calls[0]?.[0].lastReturnAt?.toISOString()).toBe(
+      '2026-06-02T00:00:00.000Z',
+    );
+  });
+
+  it('persists the episode, its dedup lookup and the reminder labels on UTC-midnight 02.06 / 17.06', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: RETURN_CEST })],
+    });
+
+    await h.service.runDaily(NOW_CEST);
+
+    expect(h.repo.createEpisode).toHaveBeenCalledTimes(1);
+    const created = h.repo.createEpisode.mock.calls[0]?.[0] as {
+      anchorAt: Date;
+      deadlineAt: Date;
+    };
+    expect(created.anchorAt.toISOString()).toBe('2026-06-02T00:00:00.000Z');
+    expect(created.deadlineAt.toISOString()).toBe('2026-06-17T00:00:00.000Z');
+    const [lookupVehicle, lookupAnchor] = h.repo.findLatestEpisodeForAnchor.mock
+      .calls[0] as unknown as [string, Date];
+    expect(lookupVehicle).toBe('veh-1');
+    expect(lookupAnchor.toISOString()).toBe('2026-06-02T00:00:00.000Z');
+    const [, props] = h.mail.enqueueGuaranteeReminderCarrier.mock.calls[0] as [
+      string,
+      { rows: { anchorLabel: string; deadlineLabel: string; daysLeft: number }[] },
+    ];
+    expect(props.rows[0]).toMatchObject({
+      anchorLabel: '02.06.2026',
+      deadlineLabel: '17.06.2026',
+      daysLeft: 2,
+    });
+  });
+
+  it('the /guarantee-compliance board DTO reads 2026-06-02 → 2026-06-17', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: RETURN_CEST })],
+    });
+
+    const board = await h.service.getComplianceBoard(adminUser, NOW_CEST);
+
+    expect(board.items[0]).toMatchObject({
+      vehicleId: 'veh-1',
+      anchorAt: '2026-06-02',
+      deadlineAt: '2026-06-17',
+      daysLeft: 2,
+      state: 'counting',
+    });
+  });
+
+  it('a 23:30 CET return: engine gets UTC midnight of 29.01, board reads 2026-01-29 → 2026-02-12', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: RETURN_CET })],
+    });
+
+    const board = await h.service.getComplianceBoard(adminUser, NOW_CET);
+
+    expect(engine).toHaveBeenCalledTimes(1);
+    expect(engine.mock.calls[0]?.[0].lastReturnAt?.toISOString()).toBe(
+      '2026-01-29T00:00:00.000Z',
+    );
+    expect(board.items[0]).toMatchObject({
+      anchorAt: '2026-01-29',
+      deadlineAt: '2026-02-12',
+      daysLeft: 3,
+      state: 'counting',
+    });
   });
 });

@@ -36,11 +36,11 @@ export interface WatchdogVehicleScopeRow {
   hasActiveDelegation: boolean;
   /**
    * Full `actualReturnAt` of the latest zjechał delegation, or `null` — NOT a
-   * date-only value: a Warsaw wall-clock LABELLED UTC (docs/19 #16).
-   * `computeGuaranteeWatchdog` reduces it via `polish-calendar.ts` `atMidnight`,
-   * i.e. by the PROCESS time zone: correct on the UTC api container (raw date
-   * part), a day off on a Warsaw-zone dev machine for a return typed at
-   * 23:00–23:59 CET / 22:00–23:59 CEST. Left as is (out of scope of UWAGI #26).
+   * date-only value: a Warsaw wall-clock LABELLED UTC (docs/19 #16). The row
+   * carries the raw value; the service reduces it with `startOfWallClockDayUtc`
+   * (its raw UTC date part) before the engine, so the process time zone never
+   * shifts a return typed at 23:00–23:59 CET / 22:00–23:59 CEST onto the next
+   * day (UWAGI #31, `GuaranteeWatchdogService._runEngine`).
    */
   lastReturnAt: Date | null;
   carrier: {

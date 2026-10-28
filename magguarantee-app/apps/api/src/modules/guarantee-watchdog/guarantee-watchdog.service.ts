@@ -17,11 +17,13 @@ import {
   computeGuaranteeWatchdog,
   reminderThreshold,
   startOfBusinessTodayUtc,
+  startOfWallClockDayUtc,
   type GuaranteeComplianceItem,
   type GuaranteeComplianceResponse,
   type GuaranteeEpisodeDto,
   type GuaranteeEpisodeFilters,
   type GuaranteeEpisodeListDto,
+  type GuaranteeWatchdogInput,
   type GuaranteeWatchdogResult,
   type MyGuaranteeEpisodeFilters,
 } from '@magguarantee/shared';
@@ -92,6 +94,17 @@ function pushToCarrierGroup(group: CarrierGroup, t: VehicleTrigger): void {
   };
   g.rows.push(t);
   group.set(t.scope.carrier.id, g);
+}
+
+/**
+ * UTC midnight of `d`'s PROCESS-LOCAL calendar date — the inverse of
+ * `polish-calendar`'s `atMidnight`: the engine's "local midnight of day D"
+ * becomes the UTC-midnight (`@db.Date`) encoding of D (UWAGI #31). Identity for
+ * any Date in a UTC process, and for a UTC-midnight Date in any zone at or east
+ * of UTC (there it reads back as the same local date).
+ */
+function utcMidnightOfLocalDay(d: Date): Date {
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 }
 
 /**
@@ -898,7 +911,7 @@ export class GuaranteeWatchdogService implements OnModuleInit {
     v: WatchdogVehicleScopeRow,
     today: Date,
   ): GuaranteeWatchdogResult {
-    return computeGuaranteeWatchdog({
+    return this._runEngine({
       today,
       hasActiveDelegation: v.hasActiveDelegation,
       lastReturnAt: v.lastReturnAt,
@@ -908,6 +921,51 @@ export class GuaranteeWatchdogService implements OnModuleInit {
         reminderOffsets: this._reminderOffsets(),
       },
     });
+  }
+
+  /**
+   * The ONE entry into `computeGuaranteeWatchdog` (UWAGI #31). The engine and
+   * `polish-calendar` count in PROCESS-LOCAL calendar dates (they read
+   * `getFullYear/getMonth/getDate` and build local-midnight Dates), while this
+   * service works in UTC-midnight dates: `today` (`startOfBusinessTodayUtc`),
+   * the `@db.Date` columns `agreementSince` / `anchorAt` / `deadlineAt`. Two
+   * steps make the result independent of the process zone (any zone at or
+   * east of UTC, where a UTC-midnight Date reads back as the same local date):
+   *
+   *   1. input — `lastReturnAt` is `Delegation.actualReturnAt`, a Warsaw
+   *      wall-clock LABELLED UTC (docs/19 #16): its raw UTC date part IS the
+   *      business date. `startOfWallClockDayUtc` reduces it to UTC midnight of
+   *      that date (identity for the UTC-midnight `open.anchorAt` the hooks
+   *      pass). Fed raw, a 23:30 return (`…T23:30:00Z`) read as the NEXT day
+   *      on a Warsaw-zone process: anchor, deadline and D-3/D-1 a day late.
+   *   2. output — the engine returns `anchorAt` as given and `deadlineAt` as
+   *      LOCAL midnight of day D; both are re-encoded to UTC midnight of D
+   *      (`utcMidnightOfLocalDay`), the shape every consumer expects:
+   *      `findLatestEpisodeForAnchor`, `createEpisode` (`@db.Date`),
+   *      `_toIsoDate`, `_fmtDate` (`timeZone: 'UTC'`). Left local, a Warsaw
+   *      deadline of 17.06 (`…06-16T22:00Z`) was stored and shown as 16.06.
+   *
+   * In a UTC process (the api container) both steps are identities. The engine
+   * and `polish-calendar` are intentionally untouched — `polish-calendar` also
+   * drives the verification SLA, which handles its own dates.
+   */
+  private _runEngine(input: GuaranteeWatchdogInput): GuaranteeWatchdogResult {
+    const result = computeGuaranteeWatchdog({
+      ...input,
+      lastReturnAt:
+        input.lastReturnAt === null
+          ? null
+          : startOfWallClockDayUtc(input.lastReturnAt),
+    });
+    return {
+      ...result,
+      anchorAt:
+        result.anchorAt === null ? null : utcMidnightOfLocalDay(result.anchorAt),
+      deadlineAt:
+        result.deadlineAt === null
+          ? null
+          : utcMidnightOfLocalDay(result.deadlineAt),
+    };
   }
 
   private _toComplianceItem(
@@ -982,7 +1040,7 @@ export class GuaranteeWatchdogService implements OnModuleInit {
 
   /** Signed working days from `today` to an open episode's fixed deadline. */
   private _daysLeftForEpisode(open: GuaranteeEpisodeRow, today: Date): number {
-    const result = computeGuaranteeWatchdog({
+    const result = this._runEngine({
       today,
       hasActiveDelegation: false,
       lastReturnAt: open.anchorAt,
@@ -1030,7 +1088,7 @@ export class GuaranteeWatchdogService implements OnModuleInit {
   // ── Formatting / config ──────────────────────────────────
 
   private _toIsoDate(d: Date): string {
-    // Date-only `YYYY-MM-DD` from a UTC-midnight `@db.Date` / engine Date.
+    // Date-only `YYYY-MM-DD` from a UTC-midnight `@db.Date` / `_runEngine` Date.
     return d.toISOString().slice(0, 10);
   }
 
