@@ -19,9 +19,14 @@
 //     real day. This is what the strip actually draws.
 //
 // All comparisons are on `YYYY-MM-DD` strings — ISO lexical order is calendar
-// order, so no Date parsing is needed here. `today` is injected (never
-// Date.now()) so the rule is a pure, unit-testable function.
+// order, so no Date arithmetic is needed here. The one zone-aware step is the
+// start day (`delegationStartDay` below): the reported `departureAt` is a
+// TRUE UTC instant reduced to its Warsaw calendar date, while every other
+// field is date-only or Warsaw wall-clock labelled UTC and is sliced raw
+// (docs/19-known-quirks.md #16). `today` is injected (never Date.now()) so the
+// rule is a pure, unit-testable function.
 
+import { businessDateIso } from '@magguarantee/shared';
 import type { DelegationDto, VehicleDailyKmDto } from '@magguarantee/shared';
 
 /** A delegation, reduced to the fields the window rule reads. */
@@ -37,9 +42,41 @@ type CalendarDelegation = Pick<
 /** A km row, reduced to the only field the window rule reads. */
 type CalendarKmRow = Pick<VehicleDailyKmDto, 'date'>;
 
-/** Date portion (`YYYY-MM-DD`) of a date or datetime ISO string. */
+/**
+ * Date portion (`YYYY-MM-DD`) of a date or datetime ISO string — a raw slice,
+ * no zone conversion. Correct for the date-only fields (`plannedReturnAt`, km
+ * `date`) and for the Warsaw wall-clock-labelled-UTC `actual*At`; NOT for the
+ * true-UTC `departureAt` (use {@link delegationStartDay}).
+ */
 function dateOnly(iso: string): string {
   return iso.slice(0, 10);
+}
+
+/**
+ * The delegation's START DAY (`YYYY-MM-DD`) — the single anchor shared by the
+ * km FETCH range (`from` of the history query) and the RENDER window
+ * ({@link deriveCalendarWindow}), so the two can never drift apart.
+ *
+ *   actualDepartureAt set → its raw date portion. The verifier-corrected real
+ *     start is Warsaw WALL-CLOCK LABELLED UTC (the weryfikator types 00:30, the
+ *     api stores `…T00:30:00Z`), so the slice IS the business date; converting
+ *     it to Warsaw would push a late-evening start into the next day (UWAGI #26
+ *     in reverse).
+ *   else departureAt      → its Warsaw calendar date. The carrier-reported
+ *     departure is a TRUE UTC instant (the form posts
+ *     `new Date(datetimeLocal).toISOString()`), so a raw slice would be the UTC
+ *     day — one day early for a departure declared at 00:00–00:59 CET /
+ *     00:00–01:59 CEST (UWAGI #30).
+ *
+ * docs/19-known-quirks.md #16 (dual timestamp convention on Delegation).
+ */
+export function delegationStartDay(
+  actualDepartureAt: string | null,
+  departureAt: string,
+): string {
+  return actualDepartureAt
+    ? dateOnly(actualDepartureAt)
+    : businessDateIso(new Date(departureAt));
 }
 
 /**
@@ -74,10 +111,11 @@ export function calendarFetchTo(
 /**
  * The RENDER window `{ fromIso, toIso }` — what the day-strip actually draws.
  *
- *   start (fromIso) = date(actualDepartureAt ?? departureAt)  — anchor; the
- *     verifier-corrected real start when present (so days between the carrier's
- *     reported departure and the actual start are excluded), else the reported
- *     departure; either way excludes prior-trip days
+ *   start (fromIso) = {@link delegationStartDay} — anchor; the raw date of the
+ *     verifier-corrected `actualDepartureAt` when present (so days between the
+ *     carrier's reported departure and the actual start are excluded), else
+ *     the WARSAW calendar date of the reported `departureAt` (a true UTC
+ *     instant — never its UTC slice); either way excludes prior-trip days
  *   renderEnd (toIso) =
  *     zjechal          → actualReturnAt            — closed; later km belong to next trip
  *     w_trasie         → max(plannedReturnAt, lastKmDate)
@@ -100,8 +138,9 @@ export function deriveCalendarWindow(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved, documented signature
   today: string,
 ): { fromIso: string; toIso: string } {
-  const fromIso = dateOnly(
-    delegation.actualDepartureAt ?? delegation.departureAt,
+  const fromIso = delegationStartDay(
+    delegation.actualDepartureAt,
+    delegation.departureAt,
   );
   const plannedEnd = dateOnly(delegation.plannedReturnAt);
 

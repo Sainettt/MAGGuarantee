@@ -28,6 +28,7 @@
 // ClaimModal (§7.10.4).
 
 import { useEffect, useMemo, useState } from 'react';
+import { businessDateIso } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
 import {
@@ -73,7 +74,10 @@ interface Props {
    * `vehicleId === null` (vehicle unassigned) silently skips the hint.
    */
   vehicleId: string | null;
-  /** Reported departure — km-window start + fallback lower bound. */
+  /**
+   * Reported departure (a TRUE UTC instant — docs/19 #16) — km-window start
+   * (its Warsaw calendar day) + fallback lower bound.
+   */
   departureAt: string;
   /**
    * Actual departure moment (set once the outing went `w_trasie`) — the hard
@@ -165,7 +169,15 @@ export function MarkReturnedDialog({
   // and count PAST days with no mark at all (a `drove`/`idle` cell both count as
   // «filled»; only «not checked» is missing). Today/future are excluded — the
   // board locks them, so flagging them would be noise. Read-only: never blocks.
-  const departureDay = departureAt.slice(0, 10);
+  // Window start = the REPORTED departure's day. `departureAt` is a TRUE UTC
+  // instant (docs/19 #16), so its day is the WARSAW calendar date — a raw ISO
+  // slice is the UTC day, one day early for a departure declared at 00:00–00:59
+  // CET / 00:00–01:59 CEST (UWAGI #30), which would fetch and flag a prior-trip
+  // day. `returnDay` is the datetime-local field value (wall-clock) → raw slice.
+  const departureDay = useMemo(
+    () => businessDateIso(new Date(departureAt)),
+    [departureAt],
+  );
   const returnDay = value.slice(0, 10);
   const { data: kmHistory } = useVehicleDailyKmHistory(
     open && vehicleId ? vehicleId : null,

@@ -25,6 +25,7 @@ import {
   EU_VAT_COUNTRY_CODES,
   isValidPostalCode,
 } from '../constants';
+import { businessDateIso } from '../domain/business-date';
 import {
   IsoDateSchema,
   IsoDateTimeSchema,
@@ -111,10 +112,14 @@ export const SubmitDelegationSchema = z
         message: `Nieprawidłowy format kodu pocztowego dla ${obj.returnCountry}`,
       });
     }
-    // Date-level comparison (drop the time portion of `departureAt`) — the
-    // planned-return is date-only, so "same day" is allowed even if the
-    // departure timestamp is 23:50.
-    const departureDay = obj.departureAt.slice(0, 10);
+    // Date-level comparison — the planned return is date-only, so "same day"
+    // is allowed even if the departure is at 23:50. `departureAt` is a TRUE UTC
+    // instant (the form posts `new Date(datetimeLocal).toISOString()`), so the
+    // day is its WARSAW calendar date (docs/19 #16, UWAGI #30) — a raw ISO
+    // slice would be the UTC day, one day early for a departure declared at
+    // 00:00–00:59 CET / 00:00–01:59 CEST, and would accept a planned return
+    // dated the day BEFORE the departure.
+    const departureDay = businessDateIso(new Date(obj.departureAt));
     if (obj.plannedReturnAt < departureDay) {
       ctx.addIssue({
         path: ['plannedReturnAt'],
@@ -207,7 +212,8 @@ export type MarkReadyDto = z.infer<typeof MarkReadySchema>;
  * derives from the DAY, and its `timeFrom` from the wall-clock `HH:mm` (the
  * carrier no longer types a time window). The service validates it — not in the
  * future (`<= now`, datetime granularity), not before the reported `departureAt`
- * DAY (`>= startOfUtcDay(departureAt)`, so an earlier same-day start is allowed).
+ * DAY (`>= startOfBusinessDayUtc(departureAt)` — its Warsaw day, docs/19 #16 —
+ * so an earlier same-day start is allowed).
  * `note` is an optional free-form annotation; the service stamps `verifiedBy/At`.
  */
 export const MarkInTransitSchema = z
@@ -276,9 +282,9 @@ export const DEPARTURE_DATE_FUTURE_CODE = 'DEPARTURE_DATE_FUTURE' as const;
  * Stable, machine-readable code surfaced in the `extensions.code` field of the
  * 422 problem-details envelope when the weryfikator marks an outing `w_trasie`
  * (`POST /delegations/:id/in-transit`) with an `actualDepartureAt` EARLIER than
- * the carrier-reported `departureAt` DAY (compared at UTC-day granularity —
- * `actualDepartureAt >= startOfUtcDay(departureAt)`, so an earlier same-day
- * start IS allowed). A hard constraint: the actual start of driving cannot
+ * the carrier-reported `departureAt` DAY (compared at Warsaw-day granularity —
+ * `actualDepartureAt >= startOfBusinessDayUtc(departureAt)`, docs/19 #16 — so an
+ * earlier same-day start IS allowed). A hard constraint: the actual start of driving cannot
  * predate the reported departure day. Distinct from `DEPARTURE_DATE_FUTURE_CODE`
  * (the not-in-the-future check).
  */

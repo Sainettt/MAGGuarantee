@@ -19,6 +19,7 @@ import type { DelegationDto, VehicleDailyKmDto } from '@magguarantee/shared';
 import { useVehicleDailyKmHistory } from '@/lib/hooks/useVehicleKm';
 import {
   calendarFetchTo,
+  delegationStartDay,
   deriveCalendarWindow,
 } from '@/lib/format/delegationCalendar';
 import {
@@ -59,9 +60,12 @@ export function DelegationKmCalendar({ delegation }: Props) {
   // late-return overruns the legacy `plannedReturnAt` ceiling hid). Render window
   // is narrowed below. Using `actualDepartureAt` here keeps the strip from
   // painting "phantom" days between the reported and actual departure.
-  const fetchFrom = (delegation.actualDepartureAt ?? delegation.departureAt).slice(
-    0,
-    10,
+  // `delegationStartDay` is the SAME anchor `deriveCalendarWindow` renders from
+  // (Warsaw day of the true-UTC `departureAt`, raw day of the wall-clock
+  // `actualDepartureAt` — docs/19 #16), so fetch and render cannot drift apart.
+  const fetchFrom = delegationStartDay(
+    delegation.actualDepartureAt,
+    delegation.departureAt,
   );
   const fetchTo = calendarFetchTo(delegation, today);
 

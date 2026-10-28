@@ -28,6 +28,7 @@
 
 import { ArrowDown, ChevronRight, Truck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { businessDateIso } from '@magguarantee/shared';
 import type { DelegationDto } from '@magguarantee/shared';
 
 import {
@@ -41,18 +42,25 @@ interface Props {
 }
 
 /**
- * Whole calendar days between `departureAt` (date portion only) and
- * `plannedReturnAt` — mirrors the zod cross-field validation
- * (`delegations.ts:113`, which compares `departureAt.slice(0,10)` to the
- * date-only `plannedReturnAt`). Returns `null` when either date is unparseable
- * or the span is negative (the schema forbids `plannedReturnAt < departureAt`,
- * but we guard defensively so the pill never renders a negative number).
+ * Whole calendar days between the departure DAY and `plannedReturnAt` — mirrors
+ * the cross-field check in the shared `SubmitDelegationSchema`, which compares
+ * the date-only `plannedReturnAt` to the WARSAW calendar date of `departureAt`
+ * (`businessDateIso`). `departureAt` is a TRUE UTC instant (docs/19 #16), so a
+ * raw ISO slice would be the UTC day — one day early for a departure declared
+ * at 00:00–00:59 CET / 00:00–01:59 CEST, inflating the «N dni · plan.» pill by
+ * one (UWAGI #30). Returns `null` when either date is unparseable or the span
+ * is negative (the schema forbids `plannedReturnAt < departureAt`, but we guard
+ * defensively so the pill never renders a negative number).
  */
 function planDurationDays(
   departureAt: string,
   plannedReturnAt: string,
 ): number | null {
-  const depDay = departureAt.slice(0, 10);
+  // Unparseable guard BEFORE the zone reduction — `Intl` throws on an Invalid
+  // Date, and the pill must degrade to «durationUnknown», not crash the modal.
+  const depMs = Date.parse(departureAt);
+  if (Number.isNaN(depMs)) return null;
+  const depDay = businessDateIso(new Date(depMs));
   const retDay = plannedReturnAt.slice(0, 10);
   // Parse as UTC midnight so DST shifts can't move the calendar-day count.
   const dep = Date.parse(`${depDay}T00:00:00Z`);
