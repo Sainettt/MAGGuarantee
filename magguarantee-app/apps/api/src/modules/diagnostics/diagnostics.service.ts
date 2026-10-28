@@ -16,7 +16,11 @@ import type {
   DiagnosticsMailJobListDto,
   DiagnosticsResendMailResponse,
 } from '@magguarantee/shared';
-import { bucketForAnchor } from '@magguarantee/shared';
+import {
+  bucketForAnchor,
+  startOfBusinessDayUtc,
+  startOfBusinessTodayUtc,
+} from '@magguarantee/shared';
 
 import type { DashboardSlaCandidateRow } from './diagnostics.repository';
 
@@ -150,6 +154,11 @@ export class DiagnosticsService {
    * / most overdue first), and the signed `workingDaysLeft` is attached per row
    * for the web widget label. `status` is passed through so the web can mark
    * reklamacja rows (docs/21 §4).
+   *
+   * The engine sees Europe/Warsaw calendar days, not raw instants (docs/21 §1,
+   * "по датам, Europe/Warsaw"; UWAGI #32): `now` is reduced once per call
+   * (`startOfBusinessTodayUtc`), each `anchorDate` per row
+   * (`startOfBusinessDayUtc` — it is a true instant, not a wall-clock label).
    */
   private _bucketSla(
     candidates: DashboardSlaCandidateRow[],
@@ -158,8 +167,26 @@ export class DiagnosticsService {
     const overdue: DashboardSlaClaim[] = [];
     const dueSoon: DashboardSlaClaim[] = [];
 
+    // UWAGI #32. The engine (polish-calendar) counts in PROCESS-LOCAL
+    // calendar dates (`getFullYear/getMonth/getDate`), while `anchorDate`
+    // (`statusChangedAt ?? createdAt`) and `now` are TRUE UTC instants. Fed
+    // raw in the UTC api container, a claim entering the clock at 00:00–00:59
+    // CET / 00:00–01:59 CEST (23:xx Z the day before) was anchored to the
+    // previous Warsaw day, so its deadline came out one working day early, and
+    // a run just after Warsaw midnight counted "today" as yesterday. Both are
+    // reduced to their Warsaw day encoded as UTC midnight: that reads back as
+    // the same calendar day under local getters in UTC and in any zone east of
+    // it (Warsaw included); a value already at UTC midnight maps to itself, so
+    // in the UTC container such inputs behave exactly as before. Only `bucket`
+    // and `workingDaysLeft` are read — the engine's local-midnight `deadline`
+    // is not — so no output re-encoding is needed (unlike UWAGI #31).
+    const today = startOfBusinessTodayUtc(now);
+
     for (const c of candidates) {
-      const { bucket, workingDaysLeft } = bucketForAnchor(c.anchorDate, now);
+      const { bucket, workingDaysLeft } = bucketForAnchor(
+        startOfBusinessDayUtc(c.anchorDate),
+        today,
+      );
       if (bucket === 'onTrack') continue;
       const row: DashboardSlaClaim = {
         id: c.id,

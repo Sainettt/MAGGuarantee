@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 
-import { bucketForAnchor } from '@magguarantee/shared';
+import {
+  bucketForAnchor,
+  startOfBusinessDayUtc,
+  startOfBusinessTodayUtc,
+} from '@magguarantee/shared';
 
 import { runGuardedCron } from '../../common/ops-alert/guarded-cron';
 import { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
@@ -96,6 +100,11 @@ export class VerificationSlaService {
    * `workingDaysLeft` ascending (most urgent / most overdue first) so the
    * email lists the most pressing claims at the top. `status` is carried so the
    * template can mark reklamacja rows.
+   *
+   * The engine sees Europe/Warsaw calendar days, not raw instants (docs/21 §1,
+   * "по датам, Europe/Warsaw"; UWAGI #32): `now` is reduced once per call
+   * (`startOfBusinessTodayUtc`), each `anchorDate` per row
+   * (`startOfBusinessDayUtc` — it is a true instant, not a wall-clock label).
    */
   private _bucket(
     candidates: SlaDigestCandidateRow[],
@@ -104,8 +113,26 @@ export class VerificationSlaService {
     const overdue: VerificationDigestRow[] = [];
     const dueSoon: VerificationDigestRow[] = [];
 
+    // UWAGI #32. The engine (polish-calendar) counts in PROCESS-LOCAL
+    // calendar dates (`getFullYear/getMonth/getDate`), while `anchorDate`
+    // (`statusChangedAt ?? createdAt`) and `now` are TRUE UTC instants. Fed
+    // raw in the UTC api container, a claim entering the clock at 00:00–00:59
+    // CET / 00:00–01:59 CEST (23:xx Z the day before) was anchored to the
+    // previous Warsaw day, so its deadline came out one working day early, and
+    // a run just after Warsaw midnight counted "today" as yesterday. Both are
+    // reduced to their Warsaw day encoded as UTC midnight: that reads back as
+    // the same calendar day under local getters in UTC and in any zone east of
+    // it (Warsaw included); a value already at UTC midnight maps to itself, so
+    // in the UTC container such inputs behave exactly as before. Only `bucket`
+    // and `workingDaysLeft` are read — the engine's local-midnight `deadline`
+    // is not — so no output re-encoding is needed (unlike UWAGI #31).
+    const today = startOfBusinessTodayUtc(now);
+
     for (const c of candidates) {
-      const { bucket, workingDaysLeft } = bucketForAnchor(c.anchorDate, now);
+      const { bucket, workingDaysLeft } = bucketForAnchor(
+        startOfBusinessDayUtc(c.anchorDate),
+        today,
+      );
       if (bucket === 'onTrack') continue;
       const row: VerificationDigestRow = {
         nrZgl: c.nrZgl,

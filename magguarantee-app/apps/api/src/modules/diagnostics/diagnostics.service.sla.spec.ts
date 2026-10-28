@@ -10,7 +10,12 @@
 // Anchors are derived with the real `addPolishWorkingDays` helper so the test
 // is robust against the exact Polish calendar: we pick a reference `now`, then
 // craft an anchor whose deadline (`anchor + 7 working days`) sits exactly `k`
-// working days from `now`, yielding `workingDaysLeft === k`.
+// working days from `now`, yielding `workingDaysLeft === k`. Every fixture is
+// in the PRODUCTION shape — UTC midnight of the calendar day, which is what the
+// service's `startOfBusinessDayUtc` / `startOfBusinessTodayUtc` reduction hands
+// the engine — so the suite holds under `TZ=UTC` and `TZ=Europe/Warsaw` alike
+// (UWAGI #32). The last block pins that reduction with raw instants near
+// Warsaw midnight (process-zone independence, UWAGI #32).
 
 import {
   addPolishWorkingDays,
@@ -21,32 +26,55 @@ import {
 import type { DashboardSlaCandidateRow } from './diagnostics.repository';
 import { DiagnosticsService } from './diagnostics.service';
 
-// Reference 'now': Wed 2026-06-10 (a Polish working day).
-const NOW = new Date(2026, 5, 10);
+// Reference 'now': Wed 2026-06-10 (a Polish working day), UTC midnight — the
+// shape `startOfBusinessTodayUtc` yields.
+const NOW = new Date(Date.UTC(2026, 5, 10));
 
-/** Walk `n` Polish working days backward from `date` (anchor day excluded). */
+/** Local midnight of `d`'s UTC calendar date — the engine's working shape. */
+function localMidnightOfUtcDay(d: Date): Date {
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** UTC midnight of `d`'s LOCAL calendar date — the production fixture shape. */
+function utcMidnightOfLocalDay(d: Date): Date {
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+/** The engine's `addPolishWorkingDays` over UTC-midnight dates (anchor day excluded). */
+function addPolishWorkingDaysUtc(date: Date, n: number): Date {
+  return utcMidnightOfLocalDay(
+    addPolishWorkingDays(localMidnightOfUtcDay(date), n),
+  );
+}
+
+/**
+ * Walk `n` Polish working days backward over UTC-midnight dates (anchor day
+ * excluded). The walk runs on local midnights through the engine's
+ * `isPolishWorkingDay`; only the result is re-encoded.
+ */
 function subtractPolishWorkingDays(date: Date, n: number): Date {
-  const cursor = new Date(date);
+  const cursor = localMidnightOfUtcDay(date);
   let remaining = n;
   while (remaining > 0) {
     cursor.setDate(cursor.getDate() - 1);
     if (isPolishWorkingDay(cursor)) remaining -= 1;
   }
-  return cursor;
+  return utcMidnightOfLocalDay(cursor);
 }
 
 /**
- * Build an anchor date such that `bucketForAnchor(anchor, NOW).workingDaysLeft
- * === k`. Strategy: pick a guaranteed-working-day `deadline` exactly `k` signed
- * working days from NOW (so `workingDaysBetween(NOW, deadline) === k`), then
- * derive the anchor as `SLA_WORKING_DAYS` working days BEFORE that deadline so
+ * Build an anchor date (UTC midnight) such that the service-computed
+ * `workingDaysLeft` at `NOW` is `k`. Strategy: pick a guaranteed-working-day
+ * `deadline` exactly `k` signed working days from NOW (so
+ * `workingDaysBetween(NOW, deadline) === k`), then derive the anchor as
+ * `SLA_WORKING_DAYS` working days BEFORE that deadline so
  * `addPolishWorkingDays(anchor, 7) === deadline`. Both directions land on a
  * working day, so every `k` (incl. negative) resolves.
  */
 function anchorForLeft(k: number): Date {
   const deadline =
     k >= 0
-      ? addPolishWorkingDays(NOW, k)
+      ? addPolishWorkingDaysUtc(NOW, k)
       : subtractPolishWorkingDays(NOW, -k);
   return subtractPolishWorkingDays(deadline, SLA_WORKING_DAYS);
 }
@@ -323,5 +351,120 @@ describe('DiagnosticsService — SLA anchor: statusChangedAt + createdAt fallbac
       'FROM-STATUS',
     ]);
     expect(dto.overdue.every((r) => r.workingDaysLeft === -2)).toBe(true);
+  });
+});
+
+describe('DiagnosticsService — process-zone independence (UWAGI #32)', () => {
+  // `anchorDate` (`statusChangedAt ?? createdAt`) and `now` are TRUE UTC
+  // instants; the engine counts in process-local calendar dates. In the UTC
+  // api container a claim entering the clock at 00:00–00:59 CET / 00:00–01:59
+  // CEST (23:xx Z the day before) was anchored to the previous Warsaw day, and
+  // a dashboard opened just after Warsaw midnight read "today" as yesterday.
+  // Every expectation below (bar the last, a no-overshoot guard) differs by
+  // one working day between the Warsaw reading (correct) and the UTC-date
+  // reading (the bug), so without the fix they fail under `TZ=UTC`; a
+  // Warsaw-zone process happens to read them right.
+
+  /** 00:30 Warsaw on Thu 15.01.2026 (CET, UTC+1) — still 14.01 in UTC. */
+  const ANCHOR_CET = new Date('2026-01-14T23:30:00.000Z');
+  /** 01:30 Warsaw on Tue 02.06.2026 (CEST, UTC+2) — still 01.06 in UTC. */
+  const ANCHOR_CEST = new Date('2026-06-01T23:30:00.000Z');
+  /** Fri 12.06.2026, 10:00 CEST. */
+  const FRI_12_06 = new Date('2026-06-12T08:00:00.000Z');
+
+  /** Both buckets reduced to `[nrZgl, workingDaysLeft]` pairs. */
+  function buckets(dto: {
+    overdue: { nrZgl: string; workingDaysLeft: number }[];
+    dueSoon: { nrZgl: string; workingDaysLeft: number }[];
+  }): { overdue: [string, number][]; dueSoon: [string, number][] } {
+    const pairs = (
+      rows: { nrZgl: string; workingDaysLeft: number }[],
+    ): [string, number][] => rows.map((r) => [r.nrZgl, r.workingDaysLeft]);
+    return { overdue: pairs(dto.overdue), dueSoon: pairs(dto.dueSoon) };
+  }
+
+  beforeEach(() => {
+    seq = 0;
+  });
+
+  it('a claim entering the clock at 00:30 CET starts on 15.01: due today on Mon 26.01, not overdue', async () => {
+    // 15.01 + 7 working days = Mon 26.01 → 0 left (dueSoon). Anchored on
+    // 14.01 the deadline would be Fri 23.01 → −1 (overdue).
+    const svc = makeService({
+      slaCandidates: [makeCandidate({ nrZgl: 'CET', anchorDate: ANCHOR_CET })],
+    });
+
+    const dto = await svc.getDashboard(new Date('2026-01-26T09:00:00.000Z')); // 10:00 CET
+
+    expect(buckets(dto)).toEqual({ overdue: [], dueSoon: [['CET', 0]] });
+  });
+
+  it('a claim entering the clock at 01:30 CEST starts on 02.06: due today on Fri 12.06, not overdue', async () => {
+    // Thu 04.06.2026 is Boże Ciało (Easter 05.04 + 60). 02.06 + 7 working
+    // days = Fri 12.06 → 0 left. Anchored on 01.06 → Thu 11.06 → −1.
+    const svc = makeService({
+      slaCandidates: [makeCandidate({ nrZgl: 'CEST', anchorDate: ANCHOR_CEST })],
+    });
+
+    const dto = await svc.getDashboard(FRI_12_06);
+
+    expect(buckets(dto)).toEqual({ overdue: [], dueSoon: [['CEST', 0]] });
+  });
+
+  it('the anchor day flips exactly at Warsaw midnight (CEST: 22:00Z), not at UTC midnight', async () => {
+    // 21:59:59.999Z = 01.06 23:59:59.999 Warsaw → deadline Thu 11.06 → −1.
+    // 22:00:00.000Z = 02.06 00:00 Warsaw → deadline Fri 12.06 → 0.
+    const svc = makeService({
+      slaCandidates: [
+        makeCandidate({
+          nrZgl: 'BEFORE',
+          anchorDate: new Date('2026-06-01T21:59:59.999Z'),
+        }),
+        makeCandidate({
+          nrZgl: 'AT',
+          anchorDate: new Date('2026-06-01T22:00:00.000Z'),
+        }),
+      ],
+    });
+
+    const dto = await svc.getDashboard(FRI_12_06);
+
+    expect(buckets(dto)).toEqual({
+      overdue: [['BEFORE', -1]],
+      dueSoon: [['AT', 0]],
+    });
+  });
+
+  it('a dashboard opened at 00:30 Warsaw on 10.06 counts today as 10.06, not 09.06', async () => {
+    // 2026-06-09T22:30Z = 10.06 00:30 CEST, the same Warsaw day as NOW.
+    // Read as 09.06 instead: SOON 3 → 4 (dropped), OVERDUE −1 → 0 (dueSoon).
+    const svc = makeService({
+      slaCandidates: [
+        makeCandidate({ nrZgl: 'SOON', anchorDate: anchorForLeft(3) }),
+        makeCandidate({ nrZgl: 'OVERDUE', anchorDate: anchorForLeft(-1) }),
+      ],
+    });
+
+    const dto = await svc.getDashboard(new Date('2026-06-09T22:30:00.000Z'));
+
+    expect(buckets(dto)).toEqual({
+      overdue: [['OVERDUE', -1]],
+      dueSoon: [['SOON', 3]],
+    });
+  });
+
+  it('…and 23:59:59.999 Warsaw on 09.06 still counts as 09.06 (no overshoot)', async () => {
+    // 2026-06-09T21:59:59.999Z = 09.06 23:59:59.999 CEST. One working day
+    // before NOW: SOON reads 4 (dropped), OVERDUE (deadline 09.06) reads 0.
+    const svc = makeService({
+      slaCandidates: [
+        makeCandidate({ nrZgl: 'SOON', anchorDate: anchorForLeft(3) }),
+        makeCandidate({ nrZgl: 'OVERDUE', anchorDate: anchorForLeft(-1) }),
+      ],
+    });
+
+    const dto = await svc.getDashboard(new Date('2026-06-09T21:59:59.999Z'));
+
+    expect(buckets(dto)).toEqual({ overdue: [], dueSoon: [['OVERDUE', 0]] });
   });
 });
