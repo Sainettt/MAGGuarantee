@@ -35,6 +35,7 @@ import type {
   VerifyClaimDto,
 } from '@magguarantee/shared';
 import {
+  businessDateIso,
   canSubmitByDuration,
   CLAIM_BOARD_CHANGED,
   CLAIM_BOARD_INCOMPLETE,
@@ -2054,10 +2055,11 @@ export class ClaimsService {
         // «Okno godzin» — the existing time window (no new "hours" field).
         godzinyFrom: row.timeFrom,
         godzinyTo: row.timeTo,
-        // Odjazd: zgłoszony (date) → faktyczny (date). Rendered as dates so a
-        // date-only `plannedReturnAt` / a `@db.Date` never shows "02:00".
+        // Odjazd: zgłoszony → faktyczny. `departureAt` is a TRUE UTC instant →
+        // its Warsaw date; the wall-clock `actual*` and the date-only
+        // `plannedReturnAt` keep the raw ISO slice (docs/19 #16, UWAGI #28).
         odjazdPlan: row.delegationDepartureAt
-          ? toDateString(row.delegationDepartureAt)
+          ? businessDateIso(row.delegationDepartureAt)
           : null,
         odjazdFakt: row.delegationActualDepartureAt
           ? toDateString(row.delegationActualDepartureAt)

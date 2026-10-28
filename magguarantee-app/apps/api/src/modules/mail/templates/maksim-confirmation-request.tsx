@@ -39,7 +39,10 @@ export interface MaksimConfirmationRequestProps {
   godzinyFrom: string;
   /** Okno godzin — end (`HH:mm`). */
   godzinyTo: string;
-  /** Odjazd zgłoszony (date, `YYYY-MM-DD`) — `delegation.departureAt`; `null` when unlinked. */
+  /**
+   * Odjazd zgłoszony — the Warsaw business date (`YYYY-MM-DD`) of the true-UTC
+   * `delegation.departureAt`; `null` when unlinked.
+   */
   odjazdPlan: string | null;
   /** Odjazd faktyczny (date) — `delegation.actualDepartureAt`; `null` before `w_trasie`. */
   odjazdFakt: string | null;

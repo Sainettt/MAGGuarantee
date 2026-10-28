@@ -732,6 +732,97 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     );
   });
 
+  it.each<{
+    label: string;
+    dates: Pick<
+      ClaimRow,
+      | 'delegationDepartureAt'
+      | 'delegationActualDepartureAt'
+      | 'delegationPlannedReturnAt'
+      | 'delegationActualReturnAt'
+    >;
+    expected: {
+      odjazdPlan: string;
+      odjazdFakt: string | null;
+      zjazdPlan: string | null;
+      zjazdFakt: string | null;
+    };
+  }>([
+    {
+      // 00:30 CET on 15.01 — the raw UTC date part is still 14.01.
+      label: 'CET',
+      dates: {
+        delegationDepartureAt: new Date('2026-01-14T23:30:00.000Z'),
+        // Warsaw wall-clock labelled UTC (docs/19 #16): the raw date part IS
+        // the business date, so the fix must not shift these. 23:30 on 29.01
+        // stays 29.01 (the #26 convention); `plannedReturnAt` is date-only.
+        delegationActualDepartureAt: new Date('2026-01-15T00:15:00.000Z'),
+        delegationPlannedReturnAt: new Date('2026-01-30T00:00:00.000Z'),
+        delegationActualReturnAt: new Date('2026-01-29T23:30:00.000Z'),
+      },
+      expected: {
+        odjazdPlan: '2026-01-15',
+        odjazdFakt: '2026-01-15',
+        zjazdPlan: '2026-01-30',
+        zjazdFakt: '2026-01-29',
+      },
+    },
+    {
+      // 00:30 CEST on 15.07 — the raw UTC date part is still 14.07.
+      label: 'CEST',
+      dates: {
+        delegationDepartureAt: new Date('2026-07-14T22:30:00.000Z'),
+        delegationActualDepartureAt: null,
+        delegationPlannedReturnAt: null,
+        delegationActualReturnAt: null,
+      },
+      expected: {
+        odjazdPlan: '2026-07-15',
+        odjazdFakt: null,
+        zjazdPlan: null,
+        zjazdFakt: null,
+      },
+    },
+    {
+      // Control: 12:00 CEST — the UTC date already equals the Warsaw date.
+      label: 'control, UTC date = Warsaw date',
+      dates: {
+        delegationDepartureAt: new Date('2026-07-15T10:00:00.000Z'),
+        delegationActualDepartureAt: null,
+        delegationPlannedReturnAt: null,
+        delegationActualReturnAt: null,
+      },
+      expected: {
+        odjazdPlan: '2026-07-15',
+        odjazdFakt: null,
+        zjazdPlan: null,
+        zjazdFakt: null,
+      },
+    },
+  ])(
+    '7e. odjazdPlan is the Warsaw date of the true-UTC departureAt, the other three dates keep their raw ISO slice — $label (UWAGI #28)',
+    async ({ dates, expected }) => {
+      const seeded = makeClaim({ ...dates });
+      const repoFake = makeClaimsRepo([seeded]);
+      const km = makeKmCalcService();
+      const prisma = makePrismaService();
+      const mail = makeMailFake();
+      const { svc } = makeService(repoFake, km.svc, prisma, mail, makeConfigFake());
+
+      await svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {});
+      await flushMicrotasks();
+
+      expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
+      const [, props] = mail.enqueueMaksimConfirmationRequest.mock.calls[0]!;
+      expect({
+        odjazdPlan: props.odjazdPlan,
+        odjazdFakt: props.odjazdFakt,
+        zjazdPlan: props.zjazdPlan,
+        zjazdFakt: props.zjazdFakt,
+      }).toEqual(expected);
+    },
+  );
+
   it('8. re-save when ALREADY notified at the SAME amount does NOT resend (amount-aware dedup)', async () => {
     const seeded = makeClaim({
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
