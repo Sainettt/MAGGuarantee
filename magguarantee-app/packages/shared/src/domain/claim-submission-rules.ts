@@ -174,13 +174,14 @@ export type SubmitGateResult =
 
 /**
  * Authoritative carrier rule: a claim may be submitted iff `totalDays`
- * (the post-adjustment working-days total from `calcKmGwarantPerMonth`) is
+ * (the post-adjustment working-days total from `calcKmGwarant`) is
  * GREATER THAN OR EQUAL TO `workedDaysThreshold` — so exactly `10.00`
  * passes when the threshold is 10; `9.99` does not. Boundary is inclusive.
  *
  * `totalDays` must come from km-calc, not from the raw form input. The
  * carrier-side "Korekta godzin" (hoursAdjusted) field is a *correction*
- * deducted from the route hours per month, not a working-hours total — using
+ * deducted from the route hours (spread across the ISO weeks of the period),
+ * not a working-hours total — using
  * it directly would always report 0 unless the carrier filled in stoppage
  * time. The api reads `calc.totalDays` from the same km-calc that drives
  * the right-hand "DNI ROB." breakdown the carrier sees on screen.

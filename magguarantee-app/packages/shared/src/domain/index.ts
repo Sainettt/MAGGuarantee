@@ -5,6 +5,9 @@
 // app — keep these functions trivially testable in isolation.
 
 export * from './eu-calendar';
+// ISO 8601 week helpers (km limits are per ISO week since 2026-10-29). The
+// day-number core in `./civil-date` stays internal — not re-exported.
+export * from './iso-week';
 export * from './km-calc';
 export * from './claim-settlement';
 export * from './claim-submission-rules';

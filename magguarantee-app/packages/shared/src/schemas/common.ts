@@ -10,6 +10,7 @@
 
 import { z } from 'zod';
 
+import { parseIsoWeekKey } from '../domain/iso-week';
 import { PERMISSIONS } from '../permissions';
 
 // ─── Form-friendly preprocessor ───────────────────────────
@@ -101,6 +102,22 @@ export type IsoDateTime = z.infer<typeof IsoDateTimeSchema>;
 /** ISO 8601 calendar date (no time). Matches Prisma `@db.Date` columns. */
 export const IsoDateSchema = z.string().date();
 export type IsoDate = z.infer<typeof IsoDateSchema>;
+
+/**
+ * ISO 8601 week key `YYYY-Www` (two-digit week, `2026-W05`) of a week that
+ * EXISTS — `2027-W53` is rejected because 2027 has 52 weeks. The key of km
+ * limits and of every claim breakdown row since 2026-10-29
+ * (docs/01-overview.md §«Расчёт гарантии»). Validation is `parseIsoWeekKey`
+ * from `domain/iso-week.ts`, so the schema and the helpers cannot disagree.
+ */
+export const IsoWeekKeySchema = z.string().refine(
+  (key) => parseIsoWeekKey(key) !== null,
+  {
+    message:
+      'isoWeek must be `YYYY-Www` with a two-digit week that exists in that ISO year (e.g. `2026-W05`).',
+  },
+);
+export type IsoWeekKey = z.infer<typeof IsoWeekKeySchema>;
 
 // ─── Roles (mirror of Prisma enum) ────────────────────────
 

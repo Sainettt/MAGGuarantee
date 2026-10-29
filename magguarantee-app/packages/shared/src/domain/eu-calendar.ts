@@ -89,9 +89,9 @@ export function fmtIsoDateKey(d: Date): string {
  * Reason: the weekday branch of km-calc already excludes weekends, so listing
  * them as bans would be redundant for that path.
  *
- * The odd-Saturday guarantee feature (see `km-calc.ts`) needs to know which
- * *Saturday* holidays land inside a period so a qualifying Saturday that falls
- * on a ban day is NOT paid. Pass `includeSaturdays = true` to keep Saturday
+ * The per-week Saturday guarantee (`kmPerSaturday`, see `km-calc.ts`) needs
+ * to know which *Saturday* holidays land inside a period so a guaranteed
+ * Saturday that falls on a ban day is NOT paid. Pass `includeSaturdays = true` to keep Saturday
  * holidays in the map (Sundays are still dropped — they are always skipped by
  * km-calc regardless). km-calc itself routes weekday vs Saturday lookups, so a
  * single map carrying Saturday holidays never affects the weekday counting

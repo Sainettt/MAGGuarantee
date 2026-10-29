@@ -76,7 +76,7 @@ export const PERMISSION_DESCRIPTIONS: Readonly<Record<Permission, string>> = {
   'teams.manage': '`/teams*`',
   'trailer_types.manage':
     'запись `/trailer-types*` (create, patch, deactivate, hard); `GET /trailer-types` — любой залогиненный',
-  'limits.manage': '`GET /limits`, `PUT /limits/:yearMonth`, `POST /limits/bulk`',
+  'limits.manage': '`GET /limits`, `PUT /limits/:isoWeek`, `POST /limits/bulk`',
   'audit.read': '`GET /audit`',
   'diagnostics.manage': '`GET /diagnostics/{db,mails,claims}`, `POST /diagnostics/mails/:jobId/resend`',
 };

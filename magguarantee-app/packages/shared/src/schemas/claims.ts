@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   IsoDateSchema,
   IsoDateTimeSchema,
+  IsoWeekKeySchema,
   UuidSchema,
   emptyStringToUndefined,
 } from './common';
@@ -352,7 +353,7 @@ export const PreviewClaimSchema = z
      * (`delegationId` present) sends the carrier's own figure; the `przewoznik`
      * reklamacja-inspection path ignores it.
      *
-     * For a mixed period (a month with `kmPerDay = 0`) the payout is settled on
+     * For a mixed period (a week with `kmPerDay = 0`) the payout is settled on
      * the daily-km board instead, so this figure does not move the price there
      * (docs/20 §0⁵). Empty string → undefined (form-friendly) via the same
      * preprocessor the sibling fields use — a cleared numeric input never
@@ -429,7 +430,7 @@ export const REKLAMACJA_NOT_PENDING = 'REKLAMACJA_NOT_PENDING' as const;
 /**
  * 422 — `POST /claims/:nrZgl/recalc-limits` was called on a wniosek whose
  * amount is frozen. The refresh re-prices a wniosek with the CURRENT
- * `monthly_limits` (the escape hatch from the limits-snapshot freeze), so it
+ * `weekly_limits` (the escape hatch from the limits-snapshot freeze), so it
  * is allowed ONLY in `NA_WERYFIKACJI`:
  *  - `OCZEKUJE_NA_AUTORYZACJE` — Maksim was already emailed a concrete
  *    dopłata; the number must not move underneath the authorization;
@@ -441,9 +442,9 @@ export const CLAIM_LIMITS_REFRESH_BLOCKED =
   'CLAIM_LIMITS_REFRESH_BLOCKED' as const;
 
 /**
- * 422 — `ZAAKCEPTOWANO` on a MIXED period (a month with `kmPerDay = 0`, so the
+ * 422 — `ZAAKCEPTOWANO` on a MIXED period (a week with `kmPerDay = 0`, so the
  * payout is settled on the weryfikator's daily-km board, docs/20 §0⁵) while a
- * counted day of a guaranteed month has no board row. `extensions.missingDates`
+ * counted day of a guaranteed week has no board row. `extensions.missingDates`
  * lists those days (ISO `YYYY-MM-DD`, ascending). The weryfikator fills them
  * in; nothing is guessed. Never raised for `ODRZUCONO` or a reklamacja.
  */
@@ -460,23 +461,14 @@ export const CLAIM_BOARD_INCOMPLETE = 'CLAIM_BOARD_INCOMPLETE' as const;
  */
 export const CLAIM_BOARD_CHANGED = 'CLAIM_BOARD_CHANGED' as const;
 
-// ─── km-calc breakdown row (mirror of MonthBreakdown in domain/km-calc) ──
+// ─── km-calc breakdown row (mirror of WeekBreakdown in domain/km-calc) ──
 
 /**
- * Wire shape for one month in the breakdown column on `Claim.breakdown`
- * (Json) and as returned by `/preview`. Matches the `MonthBreakdown`
- * interface in `domain/km-calc.ts` — kept as a separate Zod schema so
- * the wire contract is independent of the engine's TS types.
- *
- * The TS type alias here is `MonthBreakdownDto` to avoid colliding with
- * the engine's `MonthBreakdown` interface which is also re-exported
- * from `@magguarantee/shared`.
- */
-/**
- * One holiday / EU heavy-vehicle ban day that was dropped from this month's
- * working-day count. Weekends are deliberately NOT included — they're
- * universal and would dominate the list. Matches `ExcludedDay` in
- * `domain/km-calc.ts`.
+ * One holiday / EU heavy-vehicle ban day that was dropped from this week's
+ * count. Weekends are deliberately NOT included — they're universal and would
+ * dominate the list — EXCEPT a week's Saturday that had a Saturday guarantee
+ * (`kmPerSaturday > 0`) and fell on a ban: it is not paid and is listed here.
+ * Matches `ExcludedDay` in `domain/km-calc.ts`.
  */
 export const ExcludedDaySchema = z.object({
   date: IsoDateSchema,
@@ -484,47 +476,63 @@ export const ExcludedDaySchema = z.object({
 });
 export type ExcludedDayDto = z.infer<typeof ExcludedDaySchema>;
 
-export const MonthBreakdownSchema = z.object({
-  yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-  // WEEKDAY days only (Mon–Fri, post EU-ban / fraction / hoursAdjusted).
-  // Total days for the month = `workingDays + saturdaysCounted`.
+/**
+ * Wire shape for one ISO WEEK of the breakdown on `Claim.breakdown` (JSONB)
+ * and in `/preview` responses — the twin of the engine's `WeekBreakdown`
+ * (`domain/km-calc.ts`), kept as a separate Zod schema so the wire contract is
+ * independent of the engine's TS types. Field list = docs/13-api-design.md
+ * «WeekBreakdown».
+ *
+ * Replaced `MonthBreakdownSchema` on 2026-10-29. No `.default()`s and no
+ * compatibility with monthly rows: no wniosek existed on prod before the
+ * switch, so a persisted breakdown is always weekly and complete.
+ *
+ * The TS alias is `WeekBreakdownDto` so it does not collide with the engine's
+ * `WeekBreakdown` interface (also exported from `@magguarantee/shared`).
+ */
+export const WeekBreakdownSchema = z.object({
+  /** `YYYY-Www` — the week key and the key of the limits snapshot. */
+  isoWeek: IsoWeekKeySchema,
+  /** Monday of the full week. */
+  weekStart: IsoDateSchema,
+  /** Sunday of the full week. */
+  weekEnd: IsoDateSchema,
+  /** First day of the week inside the claim period. */
+  periodStart: IsoDateSchema,
+  /** Last day of the week inside the claim period. */
+  periodEnd: IsoDateSchema,
+  /**
+   * Counted WEEKDAY days (Mon–Fri, after EU-ban / fractions / hoursAdjusted).
+   * Total days of the week = `workingDays + saturdaysCounted`.
+   */
   workingDays: z.number().nonnegative(),
   kmPerDay: z.number().nonnegative(),
+  /** EUR/km for the weekdays AND the Saturday of the week. */
   ratePerKm: z.number().nonnegative(),
-  // Odd-Saturday guarantee fields — `.optional().default(0)` so old persisted
-  // `Claim.breakdown` JSONB rows (written before the feature) parse cleanly and
-  // backfill to 0. New rows always include them. Mirror of `MonthBreakdown` in
-  // `domain/km-calc.ts`.
-  /** Whole qualifying ("odd") Saturdays credited this month (integer, ≥0). */
-  saturdaysCounted: z.number().nonnegative().default(0),
-  /** Guarantee km per qualifying Saturday applied this month (`0` = feature OFF). */
-  kmPerSaturday: z.number().nonnegative().default(0),
-  /** km guaranteed from Saturdays this month (= round(saturdaysCounted * kmPerSaturday)). */
-  kmFromSaturdays: z.number().nonnegative().default(0),
-  // Grand-total km guaranteed for the month = round(workingDays*kmPerDay) + kmFromSaturdays.
-  kmInMonth: z.number().nonnegative(),
+  /** `1` when the week's Saturday was credited (a whole day), else `0`. */
+  saturdaysCounted: z.union([z.literal(0), z.literal(1)]),
+  /** km for the week's Saturday (`0` ⇒ the week has no Saturday guarantee). */
+  kmPerSaturday: z.number().nonnegative(),
+  /** `round(saturdaysCounted × kmPerSaturday)`. */
+  kmFromSaturdays: z.number().nonnegative(),
   /**
-   * ISO dates of the CREDITED qualifying Saturdays this month (ascending).
-   * Mirror of `MonthBreakdown.saturdayDays` in `domain/km-calc.ts`; symmetric
-   * with `excludedDays` (a qualifying Saturday on a ban is in `excludedDays`,
-   * not here). `.default([])` so old persisted `Claim.breakdown` JSONB rows
-   * (written before the feature) parse cleanly. `IsoDateSchema` — same as
-   * `ExcludedDaySchema.date`.
+   * The credited Saturday (`[]` if not credited). A guaranteed Saturday on a
+   * ban is in `excludedDays`, not here.
    */
-  saturdayDays: z.array(IsoDateSchema).default([]),
-  // Optional + default so old persisted `Claim.breakdown` JSONB rows (which
-  // pre-date this field) still parse cleanly. New rows always include it.
-  excludedDays: z.array(ExcludedDaySchema).default([]),
+  saturdayDays: z.array(IsoDateSchema).max(1),
+  /** Grand total = `round(workingDays × kmPerDay) + kmFromSaturdays`; Σ = `kmGuaranteed`. */
+  kmInWeek: z.number().nonnegative(),
+  excludedDays: z.array(ExcludedDaySchema),
 });
-export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
+export type WeekBreakdownDto = z.infer<typeof WeekBreakdownSchema>;
 
 /**
  * Source of the kilometres a claim's payout was settled on
  * (`ClaimSettlement.mileageSource` in `domain/claim-settlement.ts`):
- *  - `declared` — every month of the period has its weekday guarantee on, the
+ *  - `declared` — every week of the period has its weekday guarantee on, the
  *    carrier's declared mileage is charged against the guarantee;
- *  - `board`    — some month has `kmPerDay = 0`; the weryfikator's daily-km
- *    board over the counted days of the guaranteed months is charged instead.
+ *  - `board`    — some week has `kmPerDay = 0`; the weryfikator's daily-km
+ *    board over the counted days of the guaranteed weeks is charged instead.
  */
 export const MileageSourceSchema = z.enum(['declared', 'board']);
 export type MileageSource = z.infer<typeof MileageSourceSchema>;
@@ -533,10 +541,10 @@ export type MileageSource = z.infer<typeof MileageSourceSchema>;
  * The claim period's boundary calendar day + the fraction of it actually
  * credited (0..1, 2-dp). Mirror of `KmCalcResult.firstDay` / `.lastDay` in
  * `domain/km-calc.ts`. `0` when the boundary day was excluded (Sunday /
- * EU-ban weekday / non-qualifying or feature-off Saturday); `1` for a counted
- * whole day or a counted qualifying Saturday; the time-based fraction for a
- * counted weekday. This is the RAW credited fraction, BEFORE the month-level
- * `hoursAdjusted` distribution.
+ * EU-ban weekday / a Saturday that was not credited); `1` for a counted whole
+ * day or a credited Saturday; the time-based fraction for a counted weekday.
+ * This is the RAW credited fraction, BEFORE the week-level `hoursAdjusted`
+ * distribution.
  */
 export const BoundaryDaySchema = z.object({
   date: IsoDateSchema,
@@ -555,8 +563,11 @@ export type BoundaryDayDto = z.infer<typeof BoundaryDaySchema>;
  * trailing `.transform()` backfills `rawTotalDays = totalDays` so the UI
  * cleanly collapses to a single-value readout (the "no adjustment" path).
  *
+ * `breakdown` is one `WeekBreakdownSchema` row per ISO week of the period
+ * (since 2026-10-29; monthly rows are not accepted).
+ *
  * `firstDay` / `lastDay` carry the credited fraction of the period's boundary
- * calendar days so the "Miesiąc" breakdown block can show exactly how much of
+ * calendar days so the breakdown block can show exactly how much of
  * the first / last day was counted without re-deriving the calendar walk
  * client-side. `.nullable().optional()` (default `null`) so legacy persisted
  * `Claim.breakdown` rows written before this field existed still parse — new
@@ -565,12 +576,12 @@ export type BoundaryDayDto = z.infer<typeof BoundaryDaySchema>;
  * reserved for the invalid/empty-range engine path).
  *
  * `daysActive` / `daysTotal` / `mileageEffective` / `mileageSource` come from
- * the settlement pass (`domain/claim-settlement.ts`). When every month of the
+ * the settlement pass (`domain/claim-settlement.ts`). When every week of the
  * period has its weekday guarantee on, the declared mileage is charged against
  * the guarantee (`mileageSource: 'declared'`, `mileageEffective ===
- * claim.mileage`). When some month has `kmPerDay = 0`, the kilometres charged
+ * claim.mileage`). When some week has `kmPerDay = 0`, the kilometres charged
  * are the weryfikator's daily-km board summed over the counted days of the
- * guaranteed months (`mileageSource: 'board'`, docs/20 §0⁵). The per-month
+ * guaranteed weeks (`mileageSource: 'board'`, docs/20 §0⁵). The per-week
  * board detail is NOT persisted here — the board is live data and is served
  * separately as `boardSettlement` (see `ClaimBoardSettlementSchema`).
  *
@@ -584,18 +595,17 @@ export const KmCalcBreakdownSchema = z
     rawTotalDays: z.number().nonnegative().optional(),
     kmGuaranteed: z.number().nonnegative(),
     ratePerKmEffective: z.number().nonnegative(),
-    breakdown: z.array(MonthBreakdownSchema),
+    breakdown: z.array(WeekBreakdownSchema),
     firstDay: BoundaryDaySchema.nullable().optional().default(null),
     lastDay: BoundaryDaySchema.nullable().optional().default(null),
     /**
-     * Counted days that fall on months whose guarantee is switched ON
-     * (`kmPerDay > 0 || kmPerSaturday > 0`). `.optional()` + backfilled to
-     * `totalDays`: every wniosek written before the «wyłączane limity»
-     * feature had all of its months active by construction.
+     * Counted days that carry a guarantee: weekdays of weeks with
+     * `kmPerDay > 0` + credited Saturdays. `.optional()` + backfilled to
+     * `totalDays` (docs/13 «KmCalcBreakdown»).
      */
     daysActive: z.number().nonnegative().optional(),
     /**
-     * Counted days over the whole period (weekday days + qualifying
+     * Counted days over the whole period (weekday days + credited
      * Saturdays) — equal to `totalDays` up to 2-dp rounding. Backfilled to
      * `totalDays` on legacy rows for the same reason as `daysActive`.
      */
@@ -625,31 +635,32 @@ export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 
 // ─── Board settlement (mixed periods, docs/20 §0⁵) ───────
 
-/** Mirror of `SettlementMonthMode` in `domain/claim-settlement.ts`. */
-export const SettlementMonthModeSchema = z.enum([
+/** Mirror of `SettlementWeekMode` in `domain/claim-settlement.ts`. */
+export const SettlementWeekModeSchema = z.enum([
   'active',
   'saturdaysOnly',
   'off',
 ]);
 
 /**
- * One calendar month of a mixed period on the board — wire mirror of
- * `SettlementBoardMonth` in `domain/claim-settlement.ts`:
+ * One ISO week of a mixed period on the board — wire mirror of
+ * `SettlementBoardWeek` in `domain/claim-settlement.ts`:
  *  - `km`           — Σ `drove` km on the counted days (0 for `off`);
- *  - `daysRequired` — `active`: every calendar day of month ∩ period;
- *                     `saturdaysOnly`: the credited Saturdays; `off`: 0;
+ *  - `daysRequired` — `active`: every calendar day of week ∩ period;
+ *                     `saturdaysOnly`: the credited Saturday; `off`: 0;
  *  - `daysFilled`   — required days with a row (`drove` or `idle`);
  *  - `missingDates` — required days without a row, ascending.
+ * The web joins it to the breakdown row by `isoWeek` (docs/14 §18.7.2).
  */
-export const SettlementBoardMonthSchema = z.object({
-  yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-  mode: SettlementMonthModeSchema,
+export const SettlementBoardWeekSchema = z.object({
+  isoWeek: IsoWeekKeySchema,
+  mode: SettlementWeekModeSchema,
   km: z.number().nonnegative(),
   daysFilled: z.number().int().nonnegative(),
   daysRequired: z.number().int().nonnegative(),
   missingDates: z.array(IsoDateSchema),
 });
-export type SettlementBoardMonthDto = z.infer<typeof SettlementBoardMonthSchema>;
+export type SettlementBoardWeekDto = z.infer<typeof SettlementBoardWeekSchema>;
 
 /**
  * The LIVE board settlement of a mixed-period claim, computed on read (never
@@ -671,7 +682,8 @@ export const ClaimBoardSettlementSchema = z.object({
   mileageEffective: z.number().nonnegative(),
   kmDifference: z.number(),
   paymentEur: z.number().nonnegative(),
-  months: z.array(SettlementBoardMonthSchema),
+  /** Every ISO week of the period, ascending. */
+  weeks: z.array(SettlementBoardWeekSchema),
   missingDates: z.array(IsoDateSchema),
   complete: z.boolean(),
 });
@@ -738,7 +750,7 @@ export const PreviewClaimResponseSchema = z.object({
    */
   delegationContext: PreviewDelegationContextSchema.optional(),
   /**
-   * Live per-month board settlement — ONLY on `POST /claims/:nrZgl/preview`
+   * Live per-week board settlement — ONLY on `POST /claims/:nrZgl/preview`
    * for `pracownik` / `admin`, and non-null only when the previewed period is
    * mixed (`breakdown.mileageSource === 'board'`). Absent for carrier callers
    * (new-claim and reklamacja inspection alike). See
@@ -781,6 +793,34 @@ export const RecalcLimitsFiguresSchema = z.object({
 export type RecalcLimitsFigures = z.infer<typeof RecalcLimitsFiguresSchema>;
 
 /**
+ * One side ("było" / "będzie") of a week whose limits a refresh would change:
+ * the three limits applied to the week plus the week's resulting `kmInWeek`
+ * (the same-named fields of the week's `WeekBreakdownSchema` row).
+ */
+export const RecalcLimitsWeekFiguresSchema = z.object({
+  kmPerDay: z.number().nonnegative(),
+  ratePerKm: z.number().nonnegative(),
+  kmPerSaturday: z.number().nonnegative(),
+  kmInWeek: z.number().nonnegative(),
+});
+export type RecalcLimitsWeekFigures = z.infer<typeof RecalcLimitsWeekFiguresSchema>;
+
+/**
+ * A week of the wniosek's period whose limits differ between the frozen
+ * snapshot (`current`) and today's `weekly_limits` (`next`). `periodStart` /
+ * `periodEnd` are the week's days inside the claim period (docs/13
+ * `GET /claims/:nrZgl/recalc-limits/preview`).
+ */
+export const RecalcLimitsChangedWeekSchema = z.object({
+  isoWeek: IsoWeekKeySchema,
+  periodStart: IsoDateSchema,
+  periodEnd: IsoDateSchema,
+  current: RecalcLimitsWeekFiguresSchema,
+  next: RecalcLimitsWeekFiguresSchema,
+});
+export type RecalcLimitsChangedWeek = z.infer<typeof RecalcLimitsChangedWeekSchema>;
+
+/**
  * Response of `GET /claims/:nrZgl/recalc-limits/preview` — the DRY RUN behind
  * the «Przelicz wg aktualnych limitów» confirmation dialog
  * (docs/14-design-system.md §16.6).
@@ -805,8 +845,15 @@ export const RecalcLimitsPreviewSchema = z.object({
   changed: z.boolean(),
   /** What the wniosek carries right now (its frozen limits snapshot). */
   current: RecalcLimitsFiguresSchema,
-  /** What it would carry after a refresh against today's `monthly_limits`. */
+  /** What it would carry after a refresh against today's `weekly_limits`. */
   next: RecalcLimitsFiguresSchema,
+  /**
+   * Only the weeks of the period whose limits changed, ascending by week —
+   * the list in `<RecalcLimitsDialog>` (docs/14 §18).
+   */
+  changedWeeks: z.array(RecalcLimitsChangedWeekSchema),
+  /** How many weeks of the period kept their limits («Pozostałe N tygodni bez zmian»). */
+  unchangedWeekCount: z.number().int().nonnegative(),
 });
 export type RecalcLimitsPreviewDto = z.infer<typeof RecalcLimitsPreviewSchema>;
 
@@ -1096,7 +1143,7 @@ export const ClaimDtoSchema = z.object({
    */
   verifierMileage: z.number().nullable(),
   /**
-   * LIVE board settlement for a mixed period (docs/20 §0⁵) — per-month board
+   * LIVE board settlement for a mixed period (docs/20 §0⁵) — per-week board
    * km, filled/required days and the missing dates, plus the amount the claim
    * would be paid on right now. Computed on read by `GET /claims/:nrZgl` for
    * `admin` / `pracownik` from the claim's stored period, times,

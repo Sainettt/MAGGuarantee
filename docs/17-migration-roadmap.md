@@ -1065,7 +1065,7 @@ describe('calcKmGwarantPerMonth', () => {
 | # | Что | Агент |
 |---|---|---|
 | 0 | Документация (этот раздел, docs 01/03/04/10/11/12/13/14/19/20/21, CLAUDE.md) | main + uiux-agent (docs/14) |
-| 1 | `packages/shared`: хелперы недель ISO, `calcKmGwarant` по неделям, settlement по неделям, Zod (`WeekBreakdownSchema`, DTO лимитов), ≥30 фикстур — аддитивно, помесячное пока остаётся | api-agent |
+| 1 | `packages/shared`: хелперы недель ISO, `calcKmGwarant` по неделям, settlement по неделям, Zod (`WeekBreakdownSchema`, DTO лимитов), ≥30 фикстур — замена на месте (api/web не собираются с новым shared до этапа 3; помесячные DTO лимитов остаются до этапа 4) | api-agent |
 | 2 | БД: модель `WeeklyLimit`, миграция с переносом (чистый SQL, идемпотентно), seed / seed.prod. `monthly_limits` пока остаётся | db-agent (параллельно с 1) |
 | 3 | Расчёт: api (km-calc, claims, снимок, recalc-limits + понедельный dry run, diagnostics, письмо) + web (BreakdownTable, ClaimModal, RecalcLimitsDialog, превью) — одним коммитом | api-agent → web-agent |
 | 4 | Лимиты: api (`/limits` по неделям, bulk, authz-снимки, аудит) + web (календарь) — одним коммитом | api-agent → web-agent |

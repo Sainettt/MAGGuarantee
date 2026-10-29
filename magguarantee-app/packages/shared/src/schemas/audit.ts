@@ -71,6 +71,10 @@ export const AUDIT_TARGET_TYPES = [
   'TrailerType',
   'Driver',
   'DriverAttachment',
+  // km limits per ISO week since 2026-10-29 (`limits.update` / `limits.bulkUpdate`).
+  'WeeklyLimit',
+  // Pre-2026-10-29 limit edits — rows with this target exist on prod, so it
+  // stays filterable after `monthly_limits` is gone.
   'MonthlyLimit',
   'MailJob',
   // Google SSO — the stanowisko → role table an admin edits (docs/24).

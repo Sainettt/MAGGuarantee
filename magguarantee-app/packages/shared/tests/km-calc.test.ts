@@ -1,947 +1,807 @@
-// Fixture suite for `calcKmGwarantPerMonth`.
+// Fixture suite for `calcKmGwarant` — the guarantee engine priced per ISO week
+// (2026-10-29, docs/01-overview.md §«Расчёт гарантии»).
 //
-// Per docs/17-migration-roadmap.md:462-526 — there is no real production
-// data; expected values are computed from the GAS reference at
-// `Code.gs:862` by hand (or via a one-off offline mirror script). If a
-// fixture diverges from Code.gs behavior, fix the TS implementation, not
-// the test.
+// There is no production data: every expected value below is derived by hand
+// from the calendar (the facts each fixture relies on are written next to it).
+// If a fixture diverges, fix the engine, not the test — unless the calendar
+// fact in the comment is wrong.
 //
-// The suite covers, at minimum:
-//   - 4× full-month                 (fixtures 1–4)
-//   - 4× partial month              (5–8)
-//   - 3× cross-month weighted rate  (9–11)
-//   - 2× cross-year                 (12–13)
-//   - 3× Easter exclusion           (14–16)
-//   - 3× Polish/EU holidays         (17–19)
-//   - 2× single-day                 (20–21)
-//   - 2× empty/inverted             (22–23)
-//   - 3× timeFrom/timeTo            (24–26)
-//   - 3× hoursAdjusted              (27–29)
-//   - 2× missing-limit fallback     (30–31)
-//   - 1× three-month span           (32)
+// Calendar facts used throughout (2026: 1 January is a Thursday ⇒ 53 ISO weeks):
+//   2026-W01 = 29.12.2025–04.01.2026     2026-W24 = 08.06–14.06
+//   2026-W14 = 30.03–05.04               2026-W27 = 29.06–05.07 (June/July)
+//   2026-W23 = 01.06–07.06               2026-W53 = 28.12.2026–03.01.2027
+//   EU bans 2026 on weekdays: 01.01 Thu, 06.01 Tue, 03.04 Fri (Good Friday),
+//   06.04 Mon (Easter Monday), 01.05 Fri, 14.05 Thu, 25.05 Mon, 02.06 Tue,
+//   04.06 Thu (Boze Cialo), 14.07, 21.07, 26.10, 11.11, 08.12, 25.12 Fri.
+//   EU bans 2026 on Saturdays: 15.08, 03.10, 26.12.
 //
-// Every value below was generated against a JS mirror of Code.gs:862
-// (script preserved at /tmp/refcalc.cjs during development) — the GAS
-// algorithm IS the canonical source for the math.
+// Coverage (34 fixtures):
+//   A  full / partial weeks, holidays             1–4
+//   B  weeks across months, adjacent limits       5–6
+//   C  ISO-year edges (W53, W01 in December,
+//      1 Jan in the previous ISO year)            7–10
+//   D  the week's Saturday (>0 / 0 / NULL / ban /
+//      outside the period / boundary / per week)  11–18
+//   E  Easter weeks 2024 / 2025 / 2026           19–21
+//   F  fractions (timeFrom / timeTo)              22–24
+//   G  hoursAdjusted                              25–28
+//   H  fallback / switched-off weeks              29–31
+//   I  3-month claim, docs/14 example             32–33
+//   J  invalid input                              34
+//   +  boundary-day fractions, Saturday status, TZ independence
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  calcKmGwarantPerMonth,
+  FALLBACK_KM_PER_DAY,
+  FALLBACK_KM_PER_SATURDAY,
+  FALLBACK_RATE_PER_KM,
+  FALLBACK_WEEK_LIMIT,
+  calcKmGwarant,
+  weekSaturdayStatus,
   type KmCalcInput,
-  type MonthLimit,
+  type KmCalcResult,
+  type WeekBreakdown,
+  type WeekLimit,
 } from '../src/domain/km-calc';
 
-const FALLBACK: MonthLimit = { kmPerDay: 540, ratePerKm: 0.5 };
-
-/** All months of 2026 default to 540 km/day and 0.5 EUR/km. */
-const LIMITS_2026: Record<string, MonthLimit> = Object.fromEntries(
-  Array.from({ length: 12 }, (_, i) => {
-    const m = i + 1;
-    const k = `2026-${m < 10 ? '0' : ''}${m}`;
-    return [k, { kmPerDay: 540, ratePerKm: 0.5 }];
-  }),
-);
-
-const LIMITS_2026_2027: Record<string, MonthLimit> = {
-  ...LIMITS_2026,
-  '2027-01': { kmPerDay: 540, ratePerKm: 0.5 },
-  '2027-03': { kmPerDay: 540, ratePerKm: 0.5 },
-  '2027-04': { kmPerDay: 540, ratePerKm: 0.5 },
-};
-
-/**
- * Every month of 2026 with the odd-Saturday guarantee ON: kmPerSaturday = 270
- * (the seed value db-agent засидил on 2026). Mirrors the production seed so the
- * odd-Saturday fixtures below exercise the exact demoable configuration.
- */
-const LIMITS_2026_SAT: Record<string, MonthLimit> = Object.fromEntries(
-  Array.from({ length: 12 }, (_, i) => {
-    const m = i + 1;
-    const k = `2026-${m < 10 ? '0' : ''}${m}`;
-    return [k, { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 }];
-  }),
-);
-
-/**
- * Lightweight test helper — call the engine and assert on the result
- * shape. Uses `toEqual` for the breakdown so order + numeric equality
- * is verified together.
- */
+/** Run the engine with the global fallback and no configured weeks unless given. */
 function run(
   input: Partial<KmCalcInput> & Pick<KmCalcInput, 'dateStart' | 'dateEnd'>,
-) {
-  return calcKmGwarantPerMonth({
-    limits: LIMITS_2026,
-    fallback: FALLBACK,
-    ...input,
-  });
+): KmCalcResult {
+  return calcKmGwarant({ limits: {}, fallback: FALLBACK_WEEK_LIMIT, ...input });
 }
 
-describe('calcKmGwarantPerMonth — full-month', () => {
-  it('Jan 2026 — 20 working days, weekends excluded', () => {
-    const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-31' });
-    expect(r.totalDays).toBe(20);
-    // No `hoursAdjusted` → raw equals adjusted total.
-    expect(r.rawTotalDays).toBe(20);
-    expect(r.kmGuaranteed).toBe(10800);
-    expect(r.ratePerKmEffective).toBe(0.5);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-01',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        // Feature OFF (LIMITS_2026 has no kmPerSaturday ⇒ 0) — Saturdays fully
-        // excluded, so all three Saturday fields collapse to 0 and totals are
-        // unchanged from the pre-feature behavior.
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10800,
-        saturdayDays: [],
-        excludedDays: [
-          { date: '2026-01-01', label: 'Nowy Rok' },
-          { date: '2026-01-06', label: 'Trzech Kroli (DE/IT/AT)' },
-        ],
-      },
-    ]);
-  });
+/** A full breakdown row with the "nothing special" defaults, for `toEqual`. */
+function row(
+  fields: Pick<WeekBreakdown, 'isoWeek' | 'weekStart' | 'weekEnd' | 'periodStart' | 'periodEnd'> &
+    Partial<WeekBreakdown>,
+): WeekBreakdown {
+  return {
+    workingDays: 5,
+    kmPerDay: 540,
+    ratePerKm: 0.5,
+    saturdaysCounted: 0,
+    kmPerSaturday: 0,
+    kmFromSaturdays: 0,
+    saturdayDays: [],
+    kmInWeek: 2_700,
+    excludedDays: [],
+    ...fields,
+  };
+}
 
-  it('Feb 2026 — 20 working days', () => {
-    const r = run({ dateStart: '2026-02-01', dateEnd: '2026-02-28' });
-    expect(r.totalDays).toBe(20);
-    expect(r.rawTotalDays).toBe(20);
-    expect(r.kmGuaranteed).toBe(10800);
-    expect(r.breakdown[0].workingDays).toBe(20);
-  });
+const sum = (rows: readonly WeekBreakdown[], pick: (r: WeekBreakdown) => number): number =>
+  rows.reduce((acc, r) => acc + pick(r), 0);
 
-  it('Mar 2026 — 22 working days', () => {
-    const r = run({ dateStart: '2026-03-01', dateEnd: '2026-03-31' });
-    expect(r.totalDays).toBe(22);
-    expect(r.rawTotalDays).toBe(22);
-    expect(r.kmGuaranteed).toBe(11880);
-  });
-
-  it('Jul 2026 — 21 working days (incl. 14 Jul FR holiday excluded)', () => {
-    const r = run({ dateStart: '2026-07-01', dateEnd: '2026-07-31' });
-    expect(r.totalDays).toBe(21);
-    expect(r.rawTotalDays).toBe(21);
-    expect(r.kmGuaranteed).toBe(11340);
+describe('fallback constants', () => {
+  it('are 540 km/day, 0.5 EUR/km and 0 km for the Saturday', () => {
+    expect(FALLBACK_KM_PER_DAY).toBe(540);
+    expect(FALLBACK_RATE_PER_KM).toBe(0.5);
+    expect(FALLBACK_KM_PER_SATURDAY).toBe(0);
+    expect(FALLBACK_WEEK_LIMIT).toEqual({ kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 });
+    expect(Object.isFrozen(FALLBACK_WEEK_LIMIT)).toBe(true);
   });
 });
 
-describe('calcKmGwarantPerMonth — partial month', () => {
-  it('Jan 15–31 2026 — 12 working days', () => {
-    const r = run({ dateStart: '2026-01-15', dateEnd: '2026-01-31' });
-    expect(r.totalDays).toBe(12);
-    expect(r.kmGuaranteed).toBe(6480);
-  });
+// ─── A. full / partial weeks ─────────────────────────────
 
-  it('Jan 1–15 2026 — 9 working days (1 Jan excluded as Nowy Rok)', () => {
-    const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-15' });
-    expect(r.totalDays).toBe(9);
-    expect(r.kmGuaranteed).toBe(4860);
-  });
-
-  it('Mar 10–20 2026 — 9 working days', () => {
-    const r = run({ dateStart: '2026-03-10', dateEnd: '2026-03-20' });
-    expect(r.totalDays).toBe(9);
-    expect(r.kmGuaranteed).toBe(4860);
-  });
-
-  it('Feb 9–13 2026 — full work week', () => {
-    const r = run({ dateStart: '2026-02-09', dateEnd: '2026-02-13' });
+describe('calcKmGwarant — full and partial weeks', () => {
+  it('1. full W24 2026 (Mon–Sun), unconfigured ⇒ fallback, one row', () => {
+    const r = run({ dateStart: '2026-06-08', dateEnd: '2026-06-14' });
     expect(r.totalDays).toBe(5);
-    expect(r.kmGuaranteed).toBe(2700);
-  });
-});
-
-describe('calcKmGwarantPerMonth — cross-month weighted rate', () => {
-  it('Jan 21 – Feb 7 2026 with 0.5 vs 0.6 EUR/km', () => {
-    const r = run({
-      dateStart: '2026-01-21',
-      dateEnd: '2026-02-07',
-      limits: {
-        '2026-01': { kmPerDay: 540, ratePerKm: 0.5 },
-        '2026-02': { kmPerDay: 540, ratePerKm: 0.6 },
-      },
-    });
-    expect(r.totalDays).toBe(13);
-    expect(r.kmGuaranteed).toBe(7020);
-    // Weighted: (4320*0.5 + 2700*0.6) / 7020 = 0.53846… → rounded 0.538.
-    expect(r.ratePerKmEffective).toBe(0.538);
+    expect(r.rawTotalDays).toBe(5);
+    expect(r.kmGuaranteed).toBe(2_700);
+    expect(r.ratePerKmEffective).toBe(0.5);
     expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-01',
-        workingDays: 8,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 4320,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2026-02',
-        workingDays: 5,
-        kmPerDay: 540,
-        ratePerKm: 0.6,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 2700,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+      row({
+        isoWeek: '2026-W24',
+        weekStart: '2026-06-08',
+        weekEnd: '2026-06-14',
+        periodStart: '2026-06-08',
+        periodEnd: '2026-06-14',
+      }),
+    ]);
+    // The Sunday boundary is excluded (0), the Monday is whole (1).
+    expect(r.firstDay).toEqual({ date: '2026-06-08', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-06-14', fraction: 0 });
+  });
+
+  it('2. Mon–Fri of W24 ⇒ 5 days, period clipped to Friday', () => {
+    const r = run({ dateStart: '2026-06-08', dateEnd: '2026-06-12' });
+    expect(r.kmGuaranteed).toBe(2_700);
+    expect(r.breakdown[0]).toMatchObject({ periodStart: '2026-06-08', periodEnd: '2026-06-12' });
+    expect(r.lastDay).toEqual({ date: '2026-06-12', fraction: 1 });
+  });
+
+  it('3. W23 2026 ⇒ 02.06 (IT) and 04.06 (Boze Cialo) excluded, 3 days', () => {
+    const r = run({ dateStart: '2026-06-01', dateEnd: '2026-06-07' });
+    expect(r.totalDays).toBe(3);
+    expect(r.kmGuaranteed).toBe(1_620);
+    expect(r.breakdown[0]!.excludedDays).toEqual([
+      { date: '2026-06-02', label: 'Dzien Republiki (IT)' },
+      { date: '2026-06-04', label: 'Boze Cialo (DE/AT/IT)' },
     ]);
   });
 
-  it('Feb 23 – Mar 6 2026 with equal rates → flat 0.5', () => {
-    const r = run({ dateStart: '2026-02-23', dateEnd: '2026-03-06' });
-    expect(r.totalDays).toBe(10);
-    expect(r.kmGuaranteed).toBe(5400);
-    expect(r.ratePerKmEffective).toBe(0.5);
-    expect(r.breakdown).toHaveLength(2);
-  });
-
-  it('Jun 25 – Jul 8 2026 with different kmPerDay (500 vs 600)', () => {
-    const r = run({
-      dateStart: '2026-06-25',
-      dateEnd: '2026-07-08',
-      limits: {
-        '2026-06': { kmPerDay: 500, ratePerKm: 0.55 },
-        '2026-07': { kmPerDay: 600, ratePerKm: 0.45 },
-      },
-    });
-    expect(r.totalDays).toBe(10);
-    expect(r.kmGuaranteed).toBe(5600);
-    // (2000*0.55 + 3600*0.45) / 5600 = 0.4857… → rounded 0.486
-    expect(r.ratePerKmEffective).toBe(0.486);
+  it('4. Thu–Tue across W24/W25 ⇒ two rows clipped to the period', () => {
+    // 11.06 Thu, 12.06 Fri | 15.06 Mon, 16.06 Tue.
+    const r = run({ dateStart: '2026-06-11', dateEnd: '2026-06-16' });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.periodStart, w.periodEnd, w.workingDays])).toEqual([
+      ['2026-W24', '2026-06-11', '2026-06-14', 2],
+      ['2026-W25', '2026-06-15', '2026-06-16', 2],
+    ]);
+    expect(r.breakdown.map((w) => [w.weekStart, w.weekEnd])).toEqual([
+      ['2026-06-08', '2026-06-14'],
+      ['2026-06-15', '2026-06-21'],
+    ]);
+    expect(r.kmGuaranteed).toBe(2_160);
   });
 });
 
-describe('calcKmGwarantPerMonth — cross-year', () => {
-  it('Dec 28 2026 – Jan 5 2027', () => {
+// ─── B. weeks across months ──────────────────────────────
+
+describe('calcKmGwarant — weeks across calendar months', () => {
+  it('5. adjacent weeks with different limits: W26 500 @0.5, W27 (June/July) 600 @0.6', () => {
+    const r = run({
+      dateStart: '2026-06-22',
+      dateEnd: '2026-07-05',
+      limits: {
+        '2026-W26': { kmPerDay: 500, ratePerKm: 0.5 },
+        '2026-W27': { kmPerDay: 600, ratePerKm: 0.6 },
+        // A July-ish key must not leak into W27's June days (no month split).
+        '2026-W28': { kmPerDay: 1, ratePerKm: 9 },
+      },
+    });
+    expect(r.breakdown).toEqual([
+      row({
+        isoWeek: '2026-W26',
+        weekStart: '2026-06-22',
+        weekEnd: '2026-06-28',
+        periodStart: '2026-06-22',
+        periodEnd: '2026-06-28',
+        kmPerDay: 500,
+        kmInWeek: 2_500,
+      }),
+      row({
+        isoWeek: '2026-W27',
+        weekStart: '2026-06-29',
+        weekEnd: '2026-07-05',
+        periodStart: '2026-06-29',
+        periodEnd: '2026-07-05',
+        kmPerDay: 600,
+        ratePerKm: 0.6,
+        kmInWeek: 3_000,
+      }),
+    ]);
+    expect(r.kmGuaranteed).toBe(5_500);
+    // (2500 × 0.5 + 3000 × 0.6) / 5500 = 0.55454… → 0.555
+    expect(r.ratePerKmEffective).toBe(0.555);
+  });
+
+  it('6. a period inside one week that crosses 30.06 → 01.07 is a single row', () => {
+    const r = run({
+      dateStart: '2026-06-30',
+      dateEnd: '2026-07-03',
+      limits: { '2026-W27': { kmPerDay: 600, ratePerKm: 0.6 } },
+    });
+    expect(r.breakdown).toHaveLength(1);
+    expect(r.breakdown[0]).toMatchObject({
+      isoWeek: '2026-W27',
+      weekStart: '2026-06-29',
+      weekEnd: '2026-07-05',
+      periodStart: '2026-06-30',
+      periodEnd: '2026-07-03',
+      workingDays: 4,
+      kmInWeek: 2_400,
+    });
+    expect(r.ratePerKmEffective).toBe(0.6);
+  });
+});
+
+// ─── C. ISO-year edges ───────────────────────────────────
+
+describe('calcKmGwarant — ISO-year edges', () => {
+  it('7. 2026-W53 (28.12.2026–03.01.2027): one row, 1 Jan 2027 excluded', () => {
     const r = run({
       dateStart: '2026-12-28',
-      dateEnd: '2027-01-05',
-      limits: LIMITS_2026_2027,
+      dateEnd: '2027-01-03',
+      limits: {
+        '2026-W53': { kmPerDay: 500, ratePerKm: 0.5 },
+        '2027-W01': { kmPerDay: 1, ratePerKm: 9 },
+      },
     });
-    expect(r.totalDays).toBe(6);
-    expect(r.kmGuaranteed).toBe(3240);
     expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-12',
+      row({
+        isoWeek: '2026-W53',
+        weekStart: '2026-12-28',
+        weekEnd: '2027-01-03',
+        periodStart: '2026-12-28',
+        periodEnd: '2027-01-03',
         workingDays: 4,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 2160,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2027-01',
-        workingDays: 2,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 1080,
-        saturdayDays: [],
+        kmPerDay: 500,
+        kmInWeek: 2_000,
         excludedDays: [{ date: '2027-01-01', label: 'Nowy Rok' }],
-      },
+      }),
     ]);
+    expect(r.kmGuaranteed).toBe(2_000);
   });
 
-  it('Dec 21 2026 – Jan 4 2027 — Christmas window', () => {
+  it('8. 2026-W01 starts in December 2025: the December days use the 2026-W01 limits', () => {
+    const r = run({
+      dateStart: '2025-12-29',
+      dateEnd: '2026-01-04',
+      limits: {
+        '2026-W01': { kmPerDay: 400, ratePerKm: 0.45 },
+        '2025-W52': { kmPerDay: 1, ratePerKm: 9 },
+        '2025-W53': { kmPerDay: 1, ratePerKm: 9 }, // does not exist — never looked up
+      },
+    });
+    // 29, 30, 31 Dec + 2 Jan; 1 Jan (Nowy Rok) excluded.
+    expect(r.breakdown).toEqual([
+      row({
+        isoWeek: '2026-W01',
+        weekStart: '2025-12-29',
+        weekEnd: '2026-01-04',
+        periodStart: '2025-12-29',
+        periodEnd: '2026-01-04',
+        workingDays: 4,
+        kmPerDay: 400,
+        ratePerKm: 0.45,
+        kmInWeek: 1_600,
+        excludedDays: [{ date: '2026-01-01', label: 'Nowy Rok' }],
+      }),
+    ]);
+    expect(r.ratePerKmEffective).toBe(0.45);
+  });
+
+  it('9. 1 Jan 2021 belongs to 2020-W53 (Thursday 31.12.2020)', () => {
+    const r = run({
+      dateStart: '2020-12-28',
+      dateEnd: '2021-01-10',
+      limits: {
+        '2020-W53': { kmPerDay: 300, ratePerKm: 0.4 },
+        '2021-W01': { kmPerDay: 540, ratePerKm: 0.5 },
+        '2021-W53': { kmPerDay: 1, ratePerKm: 9 }, // 2021 has 52 weeks
+      },
+    });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.weekStart, w.weekEnd, w.workingDays, w.kmInWeek])).toEqual([
+      // 28–31.12 (4 days); 01.01.2021 Fri Nowy Rok excluded.
+      ['2020-W53', '2020-12-28', '2021-01-03', 4, 1_200],
+      // 04, 05, 07, 08.01; 06.01 Wed Trzech Kroli excluded.
+      ['2021-W01', '2021-01-04', '2021-01-10', 4, 2_160],
+    ]);
+    expect(r.breakdown[0]!.excludedDays).toEqual([{ date: '2021-01-01', label: 'Nowy Rok' }]);
+    expect(r.kmGuaranteed).toBe(3_360);
+    // (1200 × 0.4 + 2160 × 0.5) / 3360 = 0.46428… → 0.464
+    expect(r.ratePerKmEffective).toBe(0.464);
+  });
+
+  it('10. Christmas → New Year over W52, W53 and 2027-W01, only W52 configured', () => {
     const r = run({
       dateStart: '2026-12-21',
-      dateEnd: '2027-01-04',
-      limits: LIMITS_2026_2027,
+      dateEnd: '2027-01-10',
+      limits: { '2026-W52': { kmPerDay: 600, ratePerKm: 0.5 } },
     });
-    expect(r.totalDays).toBe(9);
-    expect(r.kmGuaranteed).toBe(4860);
+    expect(r.breakdown.map((w) => [w.isoWeek, w.workingDays, w.kmPerDay, w.kmInWeek])).toEqual([
+      ['2026-W52', 4, 600, 2_400], // 25.12 Fri excluded; Sat 26.12 has no Saturday guarantee
+      ['2026-W53', 4, 540, 2_160], // fallback; 01.01.2027 excluded
+      ['2027-W01', 4, 540, 2_160], // fallback; 06.01.2027 Wed excluded
+    ]);
+    // A ban on a Saturday WITHOUT Saturday guarantee is not listed (weekend).
+    expect(r.breakdown[0]!.excludedDays).toEqual([{ date: '2026-12-25', label: 'Boze Narodzenie' }]);
+    expect(r.kmGuaranteed).toBe(6_720);
   });
 });
 
-describe('calcKmGwarantPerMonth — Easter exclusion', () => {
-  it('Apr 1–10 2026 — Easter Sunday Apr 5, Good Friday Apr 3, Mon Apr 6 excluded', () => {
-    const r = run({ dateStart: '2026-04-01', dateEnd: '2026-04-10' });
-    // Apr 1–10 2026: weekdays would be Wed 1, Thu 2, Fri 3, Mon 6, Tue 7, Wed 8,
-    // Thu 9, Fri 10 (8 days). Removing Good Friday (3) + Easter Mon (6) → 6.
+// ─── D. the week's Saturday ──────────────────────────────
+
+describe('calcKmGwarant — the Saturday of a week', () => {
+  const W24 = { dateStart: '2026-06-08', dateEnd: '2026-06-14' } as const;
+
+  it('11. kmPerSaturday > 0 and the Saturday inside the period ⇒ credited, one whole day', () => {
+    const r = run({ ...W24, limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 } } });
+    expect(r.breakdown[0]).toEqual(
+      row({
+        isoWeek: '2026-W24',
+        weekStart: '2026-06-08',
+        weekEnd: '2026-06-14',
+        periodStart: '2026-06-08',
+        periodEnd: '2026-06-14',
+        saturdaysCounted: 1,
+        kmPerSaturday: 270,
+        kmFromSaturdays: 270,
+        saturdayDays: ['2026-06-13'],
+        kmInWeek: 2_970,
+      }),
+    );
     expect(r.totalDays).toBe(6);
-    expect(r.kmGuaranteed).toBe(3240);
+    expect(r.kmGuaranteed).toBe(2_970);
+    expect(weekSaturdayStatus(r.breakdown[0]!)).toBe('counted');
   });
 
-  it('Mar 25 – Apr 2 2027 — Easter Mar 28, includes Good Friday Mar 26 + Mon Mar 29', () => {
-    const r = run({
-      dateStart: '2027-03-25',
-      dateEnd: '2027-04-02',
-      limits: LIMITS_2026_2027,
-    });
-    // Mar 25 (Thu), 26 (Fri-Good Fri), 29 (Mon-Easter Mon), 30 (Tue), 31 (Wed)
-    // Apr 1 (Thu), 2 (Fri) — excluded: 26, 29 → working = 5
-    expect(r.totalDays).toBe(5);
-    expect(r.kmGuaranteed).toBe(2700);
-  });
-
-  it('Sep 1–15 2026 — window outside Easter, normal counting', () => {
-    const r = run({ dateStart: '2026-09-01', dateEnd: '2026-09-15' });
-    expect(r.totalDays).toBe(11);
-    expect(r.kmGuaranteed).toBe(5940);
-  });
-});
-
-describe('calcKmGwarantPerMonth — Polish / EU holidays', () => {
-  it('May 1–8 2026 — 1 May excluded (Swieto Pracy)', () => {
-    // Mon 4 May, Tue 5, Wed 6, Thu 7, Fri 8 → 5 days. May 1 is a Friday;
-    // it's an EU ban day. May 3 is Sun (already weekend), May 4 is Mon.
-    // Sat 2, Sun 3 are weekends.
-    const r = run({ dateStart: '2026-05-01', dateEnd: '2026-05-08' });
-    expect(r.totalDays).toBe(5);
-    expect(r.kmGuaranteed).toBe(2700);
-  });
-
-  it('Nov 9–13 2026 — 11 Nov is Wed and excluded', () => {
-    const r = run({ dateStart: '2026-11-09', dateEnd: '2026-11-13' });
-    expect(r.totalDays).toBe(4);
-    expect(r.kmGuaranteed).toBe(2160);
-  });
-
-  it('Aug 10–21 2026 — 15 Aug is Sat (weekend, no double-exclusion)', () => {
-    const r = run({ dateStart: '2026-08-10', dateEnd: '2026-08-21' });
-    expect(r.totalDays).toBe(10);
-    expect(r.kmGuaranteed).toBe(5400);
-  });
-});
-
-describe('calcKmGwarantPerMonth — single-day', () => {
-  it('Mar 10 2026 (Tue) — one working day', () => {
-    const r = run({ dateStart: '2026-03-10', dateEnd: '2026-03-10' });
-    expect(r.totalDays).toBe(1);
-    expect(r.kmGuaranteed).toBe(540);
-  });
-
-  it('Mar 7 2026 (Sat) — totalDays=0', () => {
-    const r = run({ dateStart: '2026-03-07', dateEnd: '2026-03-07' });
-    expect(r.totalDays).toBe(0);
-    expect(r.kmGuaranteed).toBe(0);
-    // The month bucket exists but with 0 days — matches Code.gs ordering.
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-03',
-        workingDays: 0,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        // Feature OFF (kmPerSaturday ⇒ 0): the lone Saturday is silently
-        // skipped — no day, no km, no excludedDays entry, no saturdayDays entry.
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 0,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-    ]);
-  });
-});
-
-describe('calcKmGwarantPerMonth — empty / inverted', () => {
-  it('inverted range start>end → empty result with fallback rate', () => {
-    const r = run({ dateStart: '2026-03-15', dateEnd: '2026-03-10' });
-    expect(r.totalDays).toBe(0);
-    // Early-return branch must also publish rawTotalDays so the UI never
-    // sees `undefined` on the empty-period path.
-    expect(r.rawTotalDays).toBe(0);
-    expect(r.kmGuaranteed).toBe(0);
-    expect(r.ratePerKmEffective).toBe(0.5);
-    expect(r.breakdown).toEqual([]);
-  });
-
-  it('invalid ISO date string → empty result', () => {
-    const r = run({ dateStart: 'not-a-date', dateEnd: '2026-03-15' });
-    expect(r.totalDays).toBe(0);
-    expect(r.rawTotalDays).toBe(0);
-    expect(r.kmGuaranteed).toBe(0);
-    expect(r.breakdown).toEqual([]);
-  });
-});
-
-describe('calcKmGwarantPerMonth — fractional days (timeFrom / timeTo)', () => {
-  it('first day starts at 12:00 → fraction 0.5 on the first working day', () => {
-    // Mar 9 (Mon, starts 12:00) → 0.5; Tue–Fri → 4 full → totalDays 4.5.
-    const r = run({
-      dateStart: '2026-03-09',
-      dateEnd: '2026-03-13',
-      timeFrom: '12:00',
-    });
-    expect(r.totalDays).toBe(4.5);
-    expect(r.kmGuaranteed).toBe(2430);
-  });
-
-  it('last day ends at 12:00 → fraction 0.5 on the last working day', () => {
-    const r = run({
-      dateStart: '2026-03-09',
-      dateEnd: '2026-03-13',
-      timeTo: '12:00',
-    });
-    expect(r.totalDays).toBe(4.5);
-    expect(r.kmGuaranteed).toBe(2430);
-  });
-
-  it('single-day with timeFrom and timeTo → (hStop-hStart)/24', () => {
-    // Mar 10, 08:00–16:00 → 8/24 = 0.333… → rounded 0.33; 0.33 * 540 = 178.2 → 178.
-    const r = run({
-      dateStart: '2026-03-10',
-      dateEnd: '2026-03-10',
-      timeFrom: '08:00',
-      timeTo: '16:00',
-    });
-    expect(r.totalDays).toBe(0.33);
-    expect(r.kmGuaranteed).toBe(178);
-  });
-});
-
-describe('calcKmGwarantPerMonth — hoursAdjusted', () => {
-  it('hoursAdjusted=0 → unchanged (rawTotalDays === totalDays)', () => {
-    const r = run({
-      dateStart: '2026-03-02',
-      dateEnd: '2026-03-13',
-      hoursAdjusted: 0,
-    });
-    expect(r.totalDays).toBe(10);
-    // No correction → raw mirrors adjusted exactly. UI collapses to a single
-    // `<HoursReadout>` value when these match.
-    expect(r.rawTotalDays).toBe(10);
-    expect(r.kmGuaranteed).toBe(5400);
-  });
-
-  it('hoursAdjusted=8 → totalDays drops by 0.33; rawTotalDays unchanged', () => {
-    const r = run({
-      dateStart: '2026-03-02',
-      dateEnd: '2026-03-13',
-      hoursAdjusted: 8,
-    });
-    expect(r.totalDays).toBe(9.67);
-    // Raw (pre-Korekta) stays at the full 10 working days the period would
-    // have produced — UI renders `240,00 h surowych / 232,08 h zaliczonych`.
-    expect(r.rawTotalDays).toBe(10);
-    // round2(hoursAdjusted/24) = 0.33 — the exact gap between raw and adjusted.
-    expect(r.rawTotalDays - r.totalDays).toBeCloseTo(0.33, 2);
-    expect(r.kmGuaranteed).toBe(5222);
-  });
-
-  it('hoursAdjusted=16 → totalDays drops by 0.67; rawTotalDays unchanged', () => {
-    const r = run({
-      dateStart: '2026-03-02',
-      dateEnd: '2026-03-13',
-      hoursAdjusted: 16,
-    });
-    expect(r.totalDays).toBe(9.33);
-    expect(r.rawTotalDays).toBe(10);
-    // round2(16/24) = 0.67.
-    expect(r.rawTotalDays - r.totalDays).toBeCloseTo(0.67, 2);
-    expect(r.kmGuaranteed).toBe(5038);
-  });
-});
-
-describe('calcKmGwarantPerMonth — missing-month limit fallback', () => {
-  it('empty limits → fallback applied for every month', () => {
-    const r = run({
-      dateStart: '2028-04-06',
-      dateEnd: '2028-04-10',
-      limits: {},
-    });
-    expect(r.totalDays).toBe(3);
-    expect(r.kmGuaranteed).toBe(1620);
-    expect(r.ratePerKmEffective).toBe(0.5);
-  });
-
-  it('partial limits — only Sep 2026 set; Oct 2026 falls back', () => {
-    const r = run({
-      dateStart: '2026-09-28',
-      dateEnd: '2026-10-02',
-      limits: { '2026-09': { kmPerDay: 540, ratePerKm: 0.5 } },
+  it('12. kmPerSaturday = 0 ⇒ the Saturday is excluded like a Sunday', () => {
+    const r = run({ ...W24, limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 } } });
+    expect(r.breakdown[0]).toMatchObject({
+      saturdaysCounted: 0,
+      kmPerSaturday: 0,
+      kmFromSaturdays: 0,
+      saturdayDays: [],
+      kmInWeek: 2_700,
+      excludedDays: [],
     });
     expect(r.totalDays).toBe(5);
-    expect(r.kmGuaranteed).toBe(2700);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-09',
-        workingDays: 3,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 1620,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2026-10',
-        workingDays: 2,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 1080,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-    ]);
-  });
-});
-
-describe('calcKmGwarantPerMonth — excludedDays surface', () => {
-  it('Apr 1–10 2026 — surfaces Good Friday + Easter Monday with labels', () => {
-    const r = run({ dateStart: '2026-04-01', dateEnd: '2026-04-10' });
-    expect(r.breakdown).toHaveLength(1);
-    expect(r.breakdown[0].excludedDays).toEqual([
-      { date: '2026-04-03', label: 'Wielki Piatek (DE/NL)' },
-      { date: '2026-04-06', label: 'Poniedzialek Wielkanocny' },
-    ]);
+    expect(weekSaturdayStatus(r.breakdown[0]!)).toBe('none');
   });
 
-  it('May 1–8 2026 — surfaces Swieto Pracy (1 May Fri); weekends not listed', () => {
-    const r = run({ dateStart: '2026-05-01', dateEnd: '2026-05-08' });
-    expect(r.breakdown[0].excludedDays).toEqual([
-      { date: '2026-05-01', label: 'Swieto Pracy' },
-    ]);
+  it('13. kmPerSaturday NULL (key absent) ⇒ falls to the Saturday fallback 0', () => {
+    const r = run({ ...W24, limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5 } } });
+    expect(r.breakdown[0]!.kmPerSaturday).toBe(0);
+    expect(r.breakdown[0]!.saturdaysCounted).toBe(0);
+    expect(r.kmGuaranteed).toBe(2_700);
   });
 
-  it('Sep 1–15 2026 — no exclusions in window → empty list', () => {
-    const r = run({ dateStart: '2026-09-01', dateEnd: '2026-09-15' });
-    expect(r.breakdown[0].excludedDays).toEqual([]);
-  });
-});
-
-describe('calcKmGwarantPerMonth — three-month span weighted rate', () => {
-  it('Jan 25 – Mar 5 2026 with rates 0.5/0.6/0.7', () => {
+  it('14. guaranteed Saturday on an EU ban (15.08.2026) ⇒ excludedDays, not paid, not a day', () => {
     const r = run({
-      dateStart: '2026-01-25',
-      dateEnd: '2026-03-05',
-      limits: {
-        '2026-01': { kmPerDay: 540, ratePerKm: 0.5 },
-        '2026-02': { kmPerDay: 540, ratePerKm: 0.6 },
-        '2026-03': { kmPerDay: 540, ratePerKm: 0.7 },
-      },
+      dateStart: '2026-08-10',
+      dateEnd: '2026-08-16',
+      limits: { '2026-W33': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 300 } },
     });
-    expect(r.totalDays).toBe(29);
-    expect(r.kmGuaranteed).toBe(15660);
-    expect(r.ratePerKmEffective).toBe(0.597);
-    expect(r.breakdown.map((b) => b.yearMonth)).toEqual([
-      '2026-01',
-      '2026-02',
-      '2026-03',
-    ]);
-  });
-});
+    expect(r.breakdown[0]).toMatchObject({
+      isoWeek: '2026-W33',
+      workingDays: 5,
+      saturdaysCounted: 0,
+      kmPerSaturday: 300,
+      kmFromSaturdays: 0,
+      saturdayDays: [],
+      kmInWeek: 2_700,
+      excludedDays: [{ date: '2026-08-15', label: 'Wniebowziecie NMP' }],
+    });
+    expect(r.totalDays).toBe(5);
+    expect(weekSaturdayStatus(r.breakdown[0]!)).toBe('notCounted');
 
-// ─── Odd-Saturday guarantee (kmPerSaturday > 0) ──────────────────
-//
-// Business rules (fixed): a "qualifying" Saturday is the 1st/3rd/5th Saturday
-// of the CALENDAR month (ordinal = floor((dayOfMonth-1)/7)+1; qualifies when
-// ordinal is odd). Independent of the claim's start date; resets on the month
-// boundary. Feature is OPT-IN per month: kmPerSaturday>0 turns it ON, ≤0/absent
-// keeps Saturdays fully excluded (legacy behavior). A qualifying Saturday is a
-// WHOLE day (never fractioned by timeFrom/timeTo), priced at the month's
-// ratePerKm; one that falls on an EU-ban/holiday is NOT paid and surfaced in
-// excludedDays instead. Every expectation below is computed by hand from these
-// rules. Reference 2026 anchors: Jan 1 = Thu, Feb 1 = Sun, Aug 1 = Sat.
-describe('calcKmGwarantPerMonth — odd-Saturday guarantee', () => {
-  it('Feb 2026 full — 4-Saturday month, qualifies 1st (7th) + 3rd (21st) → 2 counted', () => {
-    // Weekdays: 20 (Feb has no bans). Saturdays: 7(ord1✓),14(ord2),21(ord3✓),
-    // 28(ord4) → 2 qualify. km: 20*540=10800 weekday + 2*270=540 sat = 11340.
-    const r = run({ dateStart: '2026-02-01', dateEnd: '2026-02-28', limits: LIMITS_2026_SAT });
-    expect(r.rawTotalDays).toBe(22); // 20 weekday + 2 Saturday
-    expect(r.totalDays).toBe(22);
-    expect(r.kmGuaranteed).toBe(11340);
-    expect(r.ratePerKmEffective).toBe(0.5);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-02',
-        workingDays: 20, // WEEKDAY days only
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 2,
-        kmPerSaturday: 270,
-        kmFromSaturdays: 540,
-        kmInMonth: 11340,
-        saturdayDays: ['2026-02-07', '2026-02-21'],
-        excludedDays: [],
-      },
-    ]);
+    // Same week without Saturday guarantee: the holiday Saturday is a plain weekend.
+    const off = run({ dateStart: '2026-08-10', dateEnd: '2026-08-16' });
+    expect(off.breakdown[0]!.excludedDays).toEqual([]);
   });
 
-  it('Jan 2026 full — 5-Saturday month, qualifies 1st/3rd/5th (3,17,31) → 3 counted', () => {
-    // Weekdays: 20 (Jan 1 Nowy Rok + Jan 6 Trzech Kroli dropped). Saturdays:
-    // 3(ord1✓),10(2),17(ord3✓),24(4),31(ord5✓) → 3 qualify (none on a ban).
-    // km: 20*540=10800 + 3*270=810 = 11610.
-    const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-31', limits: LIMITS_2026_SAT });
-    expect(r.rawTotalDays).toBe(23); // 20 weekday + 3 Saturday
-    expect(r.totalDays).toBe(23);
-    expect(r.kmGuaranteed).toBe(11610);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-01',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 3,
-        kmPerSaturday: 270,
-        kmFromSaturdays: 810,
-        kmInMonth: 11610,
-        saturdayDays: ['2026-01-03', '2026-01-17', '2026-01-31'],
-        excludedDays: [
-          { date: '2026-01-01', label: 'Nowy Rok' },
-          { date: '2026-01-06', label: 'Trzech Kroli (DE/IT/AT)' },
-        ],
-      },
-    ]);
-  });
-
-  it('Aug 2026 full — qualifying Saturday on a ban (15 Aug) → excludedDays, not paid, not counted', () => {
-    // Aug 1 = Sat. Saturdays: 1(ord1✓),8(2),15(ord3✓ BUT Wniebowziecie NMP
-    // ban),22(4),29(ord5✓). Only Aug 1 + Aug 29 counted; Aug 15 → excludedDays.
-    // Weekdays: 21 (no weekday bans in Aug). km: 21*540=11340 + 2*270=540 = 11880.
-    const r = run({ dateStart: '2026-08-01', dateEnd: '2026-08-31', limits: LIMITS_2026_SAT });
-    expect(r.rawTotalDays).toBe(23); // 21 weekday + 2 Saturday (Aug 15 not counted)
-    expect(r.totalDays).toBe(23);
-    expect(r.kmGuaranteed).toBe(11880);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-08',
-        workingDays: 21,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 2,
-        kmPerSaturday: 270,
-        kmFromSaturdays: 540,
-        kmInMonth: 11880,
-        // Aug 15 (qualifying but on a ban) is NOT here — it went to excludedDays.
-        saturdayDays: ['2026-08-01', '2026-08-29'],
-        // The qualifying Saturday that hit the holiday is surfaced here (with
-        // its label) — the ONLY way a Saturday reaches excludedDays.
-        excludedDays: [{ date: '2026-08-15', label: 'Wniebowziecie NMP' }],
-      },
-    ]);
-  });
-
-  it('cross-month ordinal reset (Jan 24 – Feb 8 2026): Jan 24 ord4 skipped, Jan 31 ord5 ✓, Feb 7 ord1 ✓', () => {
-    // Ordinal restarts at the month boundary: Feb 7 is Feb's 1st Saturday (✓)
-    // even though it is the very next Saturday after Jan 31 (✓). Jan 24 is
-    // Jan's 4th Saturday (even) → skipped. Weekdays: Jan 26–30 (5), Feb 2–6 (5).
-    const r = run({ dateStart: '2026-01-24', dateEnd: '2026-02-08', limits: LIMITS_2026_SAT });
-    expect(r.rawTotalDays).toBe(12); // 10 weekday + 2 Saturday
-    expect(r.totalDays).toBe(12);
-    expect(r.kmGuaranteed).toBe(5940); // 2970 + 2970
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-01',
-        workingDays: 5,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 1, // Jan 31 only (Jan 24 ord4 skipped)
-        kmPerSaturday: 270,
-        kmFromSaturdays: 270,
-        kmInMonth: 2970,
-        saturdayDays: ['2026-01-31'],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2026-02',
-        workingDays: 5,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 1, // Feb 7 (ordinal reset to 1)
-        kmPerSaturday: 270,
-        kmFromSaturdays: 270,
-        kmInMonth: 2970,
-        saturdayDays: ['2026-02-07'],
-        excludedDays: [],
-      },
-    ]);
-  });
-
-  it('single-day qualifying Saturday with timeFrom/timeTo → whole day, no proportion', () => {
-    // Feb 7 2026 (Sat, ord1). Even with an 8h window the Saturday counts as a
-    // WHOLE day (1), never fractioned. km: 0 weekday + 1*270 = 270.
+  it('15. the week ends on Thursday ⇒ its Saturday is outside the period, not credited', () => {
     const r = run({
-      dateStart: '2026-02-07',
-      dateEnd: '2026-02-07',
-      timeFrom: '08:00',
-      timeTo: '16:00',
-      limits: LIMITS_2026_SAT,
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-11',
+      limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 } },
     });
-    expect(r.rawTotalDays).toBe(1);
+    expect(r.breakdown[0]).toMatchObject({
+      periodEnd: '2026-06-11',
+      workingDays: 4,
+      saturdaysCounted: 0,
+      kmPerSaturday: 270,
+      saturdayDays: [],
+      kmInWeek: 2_160,
+      excludedDays: [],
+    });
+    expect(weekSaturdayStatus(r.breakdown[0]!)).toBe('notCounted');
+  });
+
+  it('16. period starting on a guaranteed Saturday at 18:00 ⇒ that Saturday is whole', () => {
+    const r = run({
+      dateStart: '2026-06-13',
+      dateEnd: '2026-06-19',
+      timeFrom: '18:00',
+      limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 } },
+    });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.periodStart, w.periodEnd, w.workingDays, w.saturdaysCounted, w.kmInWeek])).toEqual([
+      ['2026-W24', '2026-06-13', '2026-06-14', 0, 1, 270],
+      ['2026-W25', '2026-06-15', '2026-06-19', 5, 0, 2_700],
+    ]);
+    expect(r.firstDay).toEqual({ date: '2026-06-13', fraction: 1 });
+    expect(r.totalDays).toBe(6);
+  });
+
+  it('17. single-day guaranteed Saturday with timeFrom/timeTo ⇒ whole day, no proportion', () => {
+    const r = run({
+      dateStart: '2026-06-13',
+      dateEnd: '2026-06-13',
+      timeFrom: '10:00',
+      timeTo: '14:00',
+      limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 } },
+    });
     expect(r.totalDays).toBe(1);
     expect(r.kmGuaranteed).toBe(270);
-    expect(r.ratePerKmEffective).toBe(0.5);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-02',
-        workingDays: 0,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 1,
-        kmPerSaturday: 270,
-        kmFromSaturdays: 270,
-        kmInMonth: 270,
-        saturdayDays: ['2026-02-07'],
-        excludedDays: [],
-      },
-    ]);
+    expect(r.firstDay).toEqual({ date: '2026-06-13', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-06-13', fraction: 1 });
   });
 
-  it('period edge: timeFrom fractions the first WEEKDAY (0.5) while the Saturday stays whole', () => {
-    // Feb 6 (Fri, first, 12:00 → 0.5) + Feb 7 (Sat, ord1 ✓, whole 1) + Feb 8
-    // (Sun skip) + Feb 9 (Mon, last, 1). Weekday raw = 1.5, Saturday = 1.
-    // km: round(1.5*540)=810 weekday + 270 sat = 1080.
+  it('18. Saturdays are opted in per week — no "odd Saturday of the month" rule', () => {
+    // June 2026 Saturdays: 06 (W23), 13 (W24), 20 (W25), 27 (W26). The old rule
+    // would have paid the 1st and 3rd (06, 20); now W24 and W26 decide.
     const r = run({
-      dateStart: '2026-02-06',
-      dateEnd: '2026-02-09',
-      timeFrom: '12:00',
-      limits: LIMITS_2026_SAT,
-    });
-    expect(r.rawTotalDays).toBe(2.5); // 1.5 weekday + 1 Saturday
-    expect(r.totalDays).toBe(2.5);
-    expect(r.kmGuaranteed).toBe(1080);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-02',
-        workingDays: 1.5,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 1,
-        kmPerSaturday: 270,
-        kmFromSaturdays: 270,
-        kmInMonth: 1080,
-        saturdayDays: ['2026-02-07'],
-        excludedDays: [],
+      dateStart: '2026-06-01',
+      dateEnd: '2026-06-28',
+      limits: {
+        '2026-W23': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+        '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 },
+        '2026-W25': { kmPerDay: 540, ratePerKm: 0.5 },
+        '2026-W26': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 300 },
       },
-    ]);
-  });
-
-  it('opt-in gate: kmPerSaturday = 0 → Saturdays fully excluded (legacy behavior)', () => {
-    // Same Feb 2026 window as the 4-Saturday fixture, but the limit turns the
-    // feature OFF. Result must be identical to the pre-feature Feb (20 days,
-    // 10800 km) — no Saturday day, km, or excludedDays entry.
-    const r = run({
-      dateStart: '2026-02-01',
-      dateEnd: '2026-02-28',
-      limits: { '2026-02': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 } },
     });
+    expect(r.breakdown.flatMap((w) => w.saturdayDays)).toEqual(['2026-06-13', '2026-06-27']);
+    // 3 + 5 + 5 + 5 weekdays = 18 × 540 = 9720, + 270 + 300.
+    expect(r.kmGuaranteed).toBe(10_290);
     expect(r.totalDays).toBe(20);
     expect(r.rawTotalDays).toBe(20);
-    expect(r.kmGuaranteed).toBe(10800);
-    expect(r.breakdown).toEqual([
-      {
-        yearMonth: '2026-02',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10800,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-    ]);
-  });
-
-  it('drivenDays grows by EXACTLY the number of qualifying Saturdays (feature off vs on)', () => {
-    const off = run({
-      dateStart: '2026-02-01',
-      dateEnd: '2026-02-28',
-      limits: { '2026-02': { kmPerDay: 540, ratePerKm: 0.5 } }, // kmPerSaturday absent ⇒ 0
-    });
-    const on = run({ dateStart: '2026-02-01', dateEnd: '2026-02-28', limits: LIMITS_2026_SAT });
-    // Feb 2026 has exactly 2 qualifying Saturdays (7, 21).
-    expect(on.totalDays - off.totalDays).toBe(2);
-    expect(on.rawTotalDays - off.rawTotalDays).toBe(2);
-    // Weekday-derived km is untouched; the delta is pure Saturday km.
-    expect(on.kmGuaranteed - off.kmGuaranteed).toBe(540); // 2 * 270
-    expect(on.breakdown[0].saturdaysCounted).toBe(2);
-    expect(on.breakdown[0].saturdayDays).toEqual(['2026-02-07', '2026-02-21']);
-    expect(off.breakdown[0].saturdaysCounted).toBe(0);
-    expect(off.breakdown[0].saturdayDays).toEqual([]);
-  });
-
-  it('per-month kmInMonth == weekday km + Saturday km, and Σ kmInMonth == kmGuaranteed', () => {
-    const r = run({ dateStart: '2026-01-24', dateEnd: '2026-02-08', limits: LIMITS_2026_SAT });
-    let sum = 0;
-    for (const b of r.breakdown) {
-      const kmWeekday = Math.round(b.workingDays * b.kmPerDay);
-      expect(b.kmInMonth).toBe(kmWeekday + b.kmFromSaturdays);
-      expect(b.kmFromSaturdays).toBe(Math.round(b.saturdaysCounted * b.kmPerSaturday));
-      // Invariant: the credited-Saturday date list length equals the count,
-      // and every date is a Saturday (dow 6) in ascending order.
-      expect(b.saturdayDays).toHaveLength(b.saturdaysCounted);
-      const ascending = [...b.saturdayDays].sort();
-      expect(b.saturdayDays).toEqual(ascending);
-      for (const iso of b.saturdayDays) {
-        const [y, m, d] = iso.split('-').map(Number);
-        expect(new Date(y, m - 1, d).getDay()).toBe(6);
-      }
-      sum += b.kmInMonth;
-    }
-    expect(sum).toBe(r.kmGuaranteed);
-  });
-
-  it('hoursAdjusted shrinks only weekday days; qualifying Saturdays stay whole', () => {
-    // Feb 2026 full, feature ON, 8h downtime. korektaDni = round2(8/24)=0.33.
-    // Weekday adjusted = max(0, round2(20-0.33)) = 19.67; Saturdays untouched (2).
-    // totalDays = round2(19.67 + 2) = 21.67. km: round(19.67*540)=10622 + 540 = 11162.
-    const r = run({
-      dateStart: '2026-02-01',
-      dateEnd: '2026-02-28',
-      hoursAdjusted: 8,
-      limits: LIMITS_2026_SAT,
-    });
-    expect(r.rawTotalDays).toBe(22); // pre-adjust: 20 weekday + 2 Saturday
-    expect(r.totalDays).toBe(21.67); // 19.67 weekday + 2 Saturday
-    expect(r.breakdown[0].workingDays).toBe(19.67);
-    expect(r.breakdown[0].saturdaysCounted).toBe(2);
-    // hoursAdjusted never touches Saturdays — the credited-date list is intact.
-    expect(r.breakdown[0].saturdayDays).toEqual(['2026-02-07', '2026-02-21']);
-    expect(r.breakdown[0].kmFromSaturdays).toBe(540);
-    expect(r.kmGuaranteed).toBe(11162); // 10622 + 540
   });
 });
 
-// ─── Boundary-day credited fractions (firstDay / lastDay) ────────
-//
-// The engine surfaces, for the period's first and last calendar day, the
-// RAW credited fraction (0..1, 2-dp) BEFORE the month-level `hoursAdjusted`
-// distribution. `0` when that day was excluded (Sunday / EU-ban weekday /
-// non-qualifying or feature-off Saturday); `1` for a counted whole day or a
-// counted qualifying Saturday; the time fraction for a counted weekday. These
-// drive the carrier "Miesiąc" preview block; capturing them in the engine (not
-// re-deriving downstream) is the same drift fix applied to the Saturday hint.
-describe('calcKmGwarantPerMonth — boundary-day credited fractions', () => {
-  it('multi-day with timeFrom 06:00 / timeTo 12:00 → firstDay 0.75, lastDay 0.5', () => {
-    // Mar 9 (Mon, first, starts 06:00 → (24-6)/24 = 0.75) … Mar 13 (Fri, last,
-    // stops 12:00 → 12/24 = 0.5). Distinct dates on the two boundaries.
-    const r = run({
-      dateStart: '2026-03-09',
-      dateEnd: '2026-03-13',
-      timeFrom: '06:00',
-      timeTo: '12:00',
-    });
-    expect(r.firstDay).toEqual({ date: '2026-03-09', fraction: 0.75 });
-    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 0.5 });
+// ─── E. Easter weeks ─────────────────────────────────────
+
+describe('calcKmGwarant — Easter weeks', () => {
+  it('19. Easter 2026 (05.04): Good Friday in W14, Easter Monday in W15', () => {
+    const r = run({ dateStart: '2026-03-30', dateEnd: '2026-04-12' });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.workingDays, w.excludedDays])).toEqual([
+      ['2026-W14', 4, [{ date: '2026-04-03', label: 'Wielki Piatek (DE/NL)' }]],
+      ['2026-W15', 4, [{ date: '2026-04-06', label: 'Poniedzialek Wielkanocny' }]],
+    ]);
+    expect(r.kmGuaranteed).toBe(4_320);
   });
 
-  it('single-day with timeFrom/timeTo → firstDay === lastDay, fraction = window/24', () => {
-    // Mar 10 (Tue), 08:00–16:00 → 8/24 = 0.3333 → round2 0.33. Both boundaries
-    // are the SAME calendar day, so firstDay and lastDay carry identical values.
+  it('20. Easter 2025 (20.04): 2025-W16 Good Friday 18.04, 2025-W17 Easter Monday 21.04', () => {
+    const r = run({ dateStart: '2025-04-14', dateEnd: '2025-04-25' });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.weekStart, w.workingDays])).toEqual([
+      ['2025-W16', '2025-04-14', 4],
+      ['2025-W17', '2025-04-21', 4],
+    ]);
+    expect(r.breakdown.flatMap((w) => w.excludedDays.map((d) => d.date))).toEqual([
+      '2025-04-18',
+      '2025-04-21',
+    ]);
+    expect(r.kmGuaranteed).toBe(4_320);
+  });
+
+  it('21. Easter 2024 (31.03): 2024-W13 / W14 with different limits', () => {
     const r = run({
-      dateStart: '2026-03-10',
-      dateEnd: '2026-03-10',
-      timeFrom: '08:00',
-      timeTo: '16:00',
+      dateStart: '2024-03-25',
+      dateEnd: '2024-04-05',
+      limits: {
+        '2024-W13': { kmPerDay: 500, ratePerKm: 0.5 },
+        '2024-W14': { kmPerDay: 600, ratePerKm: 0.6 },
+      },
     });
-    expect(r.firstDay).toEqual({ date: '2026-03-10', fraction: 0.33 });
+    // W13: 25–28.03 (29.03 Good Friday); W14: 02–05.04 (01.04 Easter Monday).
+    expect(r.breakdown.map((w) => [w.isoWeek, w.workingDays, w.kmInWeek])).toEqual([
+      ['2024-W13', 4, 2_000],
+      ['2024-W14', 4, 2_400],
+    ]);
+    expect(r.breakdown.flatMap((w) => w.excludedDays.map((d) => d.label))).toEqual([
+      'Wielki Piatek (DE/NL)',
+      'Poniedzialek Wielkanocny',
+    ]);
+    // (2000 × 0.5 + 2400 × 0.6) / 4400 = 0.55454… → 0.555
+    expect(r.ratePerKmEffective).toBe(0.555);
+  });
+});
+
+// ─── F. fractions ────────────────────────────────────────
+
+describe('calcKmGwarant — fractional boundary days', () => {
+  it('22. mid-week start 12:00 and mid-week end 06:00 across two weeks', () => {
+    // W24: Wed 10.06 ½ + Thu + Fri = 2.5; W25: Mon 15.06 + Tue 16.06 ¼ = 1.25.
+    const r = run({ dateStart: '2026-06-10', dateEnd: '2026-06-16', timeFrom: '12:00', timeTo: '06:00' });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.periodStart, w.periodEnd, w.workingDays, w.kmInWeek])).toEqual([
+      ['2026-W24', '2026-06-10', '2026-06-14', 2.5, 1_350],
+      ['2026-W25', '2026-06-15', '2026-06-16', 1.25, 675],
+    ]);
+    expect(r.totalDays).toBe(3.75);
+    expect(r.kmGuaranteed).toBe(2_025);
+    expect(r.firstDay).toEqual({ date: '2026-06-10', fraction: 0.5 });
+    expect(r.lastDay).toEqual({ date: '2026-06-16', fraction: 0.25 });
+  });
+
+  it('23. single weekday 08:00–20:00 ⇒ (20 − 8) / 24 = 0.5 day', () => {
+    const r = run({ dateStart: '2026-06-10', dateEnd: '2026-06-10', timeFrom: '08:00', timeTo: '20:00' });
+    expect(r.totalDays).toBe(0.5);
+    expect(r.kmGuaranteed).toBe(270);
+    expect(r.firstDay).toEqual({ date: '2026-06-10', fraction: 0.5 });
     expect(r.lastDay).toEqual(r.firstDay);
   });
 
-  it('no times → both boundary weekdays credited whole (fraction 1)', () => {
-    const r = run({ dateStart: '2026-03-09', dateEnd: '2026-03-13' });
-    expect(r.firstDay).toEqual({ date: '2026-03-09', fraction: 1 });
-    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 1 });
+  it('24. a period starting on Sunday 18:00 still gets a (zero-day) row for that week', () => {
+    const r = run({ dateStart: '2026-06-14', dateEnd: '2026-06-19', timeFrom: '18:00' });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.periodStart, w.periodEnd, w.workingDays, w.kmInWeek])).toEqual([
+      ['2026-W24', '2026-06-14', '2026-06-14', 0, 0],
+      ['2026-W25', '2026-06-15', '2026-06-19', 5, 2_700],
+    ]);
+    expect(r.firstDay).toEqual({ date: '2026-06-14', fraction: 0 });
+  });
+});
+
+// ─── G. hoursAdjusted ────────────────────────────────────
+
+describe('calcKmGwarant — hoursAdjusted', () => {
+  it('25. spread only over weeks with kmPerDay > 0 (W24 off, W25 on, 12 h)', () => {
+    const r = run({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-21',
+      hoursAdjusted: 12,
+      limits: {
+        '2026-W24': { kmPerDay: 0, ratePerKm: 0.5 },
+        '2026-W25': { kmPerDay: 540, ratePerKm: 0.5 },
+      },
+    });
+    // korekta = 0.5 day, all of it on W25: 5 → 4.5; W24 keeps its 5 days.
+    expect(r.breakdown.map((w) => [w.isoWeek, w.workingDays, w.kmInWeek])).toEqual([
+      ['2026-W24', 5, 0],
+      ['2026-W25', 4.5, 2_430],
+    ]);
+    expect(r.rawTotalDays).toBe(10);
+    expect(r.totalDays).toBe(9.5);
+    expect(r.kmGuaranteed).toBe(2_430);
   });
 
-  it('single-day counted weekday, no times → firstDay === lastDay, fraction 1', () => {
-    const r = run({ dateStart: '2026-03-10', dateEnd: '2026-03-10' });
-    expect(r.firstDay).toEqual({ date: '2026-03-10', fraction: 1 });
-    expect(r.lastDay).toEqual({ date: '2026-03-10', fraction: 1 });
+  it('26. proportional across two active weeks of unequal length (3 + 5 days, 16 h)', () => {
+    const r = run({ dateStart: '2026-06-10', dateEnd: '2026-06-19', hoursAdjusted: 16 });
+    // korekta = round2(16/24) = 0.67; W24 3 − 3/8·0.67 = 2.74875 → 2.75;
+    // W25 5 − 5/8·0.67 = 4.58125 → 4.58.
+    expect(r.breakdown.map((w) => [w.workingDays, w.kmInWeek])).toEqual([
+      [2.75, 1_485],
+      [4.58, 2_473],
+    ]);
+    expect(r.rawTotalDays).toBe(8);
+    expect(r.totalDays).toBe(7.33);
+    expect(r.kmGuaranteed).toBe(3_958);
   });
 
-  it('first day on a Sunday → firstDay.fraction 0 (excluded, NOT null)', () => {
-    // Mar 8 2026 is a Sunday. It is excluded (credited 0) but still surfaced as
-    // the boundary day with fraction 0 — `null` is reserved for invalid ranges.
-    const r = run({ dateStart: '2026-03-08', dateEnd: '2026-03-12' });
-    expect(r.firstDay).toEqual({ date: '2026-03-08', fraction: 0 });
-    // Last day (Thu Mar 12) is a counted whole weekday.
-    expect(r.lastDay).toEqual({ date: '2026-03-12', fraction: 1 });
+  it('27. a credited Saturday is untouched by the correction (24 h on W24 with Saturday)', () => {
+    const r = run({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-14',
+      hoursAdjusted: 24,
+      limits: { '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 } },
+    });
+    expect(r.breakdown[0]).toMatchObject({ workingDays: 4, saturdaysCounted: 1, kmInWeek: 2_430 });
+    expect(r.rawTotalDays).toBe(6);
+    expect(r.totalDays).toBe(5);
   });
 
-  it('last day on a Sunday → lastDay.fraction 0', () => {
-    // Mar 8 2026 (Sun) as the closing boundary.
-    const r = run({ dateStart: '2026-03-04', dateEnd: '2026-03-08' });
-    expect(r.firstDay).toEqual({ date: '2026-03-04', fraction: 1 });
-    expect(r.lastDay).toEqual({ date: '2026-03-08', fraction: 0 });
+  it('28. hoursAdjusted 0 / negative ⇒ no correction', () => {
+    const base = run({ dateStart: '2026-06-08', dateEnd: '2026-06-19' });
+    expect(run({ dateStart: '2026-06-08', dateEnd: '2026-06-19', hoursAdjusted: 0 })).toEqual(base);
+    expect(run({ dateStart: '2026-06-08', dateEnd: '2026-06-19', hoursAdjusted: -8 })).toEqual(base);
+    expect(base.totalDays).toBe(base.rawTotalDays);
+  });
+});
+
+// ─── H. fallback / switched-off weeks ────────────────────
+
+describe('calcKmGwarant — fallback and switched-off weeks', () => {
+  it('29. per-field fallback: kmPerDay 300 configured, ratePerKm NULL (NaN) ⇒ 0.5', () => {
+    const r = run({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-14',
+      limits: { '2026-W24': { kmPerDay: 300, ratePerKm: Number.NaN } },
+    });
+    expect(r.breakdown[0]).toMatchObject({ kmPerDay: 300, ratePerKm: 0.5, kmInWeek: 1_500 });
   });
 
-  it('first day on an EU-ban holiday (1 Jan Nowy Rok) → firstDay.fraction 0', () => {
-    // Jan 1 2026 is a Thursday AND Nowy Rok — a banned weekday, credited 0.
-    const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-09' });
-    expect(r.firstDay).toEqual({ date: '2026-01-01', fraction: 0 });
-    expect(r.lastDay).toEqual({ date: '2026-01-09', fraction: 1 });
+  it('30. kmPerDay 0 is a deliberate switch-off, NOT the fallback; days still counted', () => {
+    const r = run({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-14',
+      limits: { '2026-W24': { kmPerDay: 0, ratePerKm: 0.7 } },
+    });
+    expect(r.breakdown[0]).toMatchObject({ workingDays: 5, kmPerDay: 0, ratePerKm: 0.7, kmInWeek: 0 });
+    expect(r.totalDays).toBe(5);
+    expect(r.kmGuaranteed).toBe(0);
+    // No km to weigh ⇒ the effective rate is the fallback rate.
+    expect(r.ratePerKmEffective).toBe(0.5);
   });
 
-  it('last day on an EU-ban holiday (1 May Swieto Pracy) → lastDay.fraction 0', () => {
-    // May 1 2026 is a Friday AND Swieto Pracy — banned weekday, credited 0.
-    const r = run({ dateStart: '2026-04-27', dateEnd: '2026-05-01' });
-    expect(r.firstDay).toEqual({ date: '2026-04-27', fraction: 1 });
+  it('31. a custom fallback (AppConfig override) applies to every unconfigured week', () => {
+    const r = calcKmGwarant({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-21',
+      limits: { '2026-W25': { kmPerDay: 540, ratePerKm: 0.5 } },
+      fallback: { kmPerDay: 450, ratePerKm: 0.48 },
+    });
+    expect(r.breakdown.map((w) => [w.isoWeek, w.kmPerDay, w.ratePerKm, w.kmInWeek])).toEqual([
+      ['2026-W24', 450, 0.48, 2_250],
+      ['2026-W25', 540, 0.5, 2_700],
+    ]);
+    // (2250 × 0.48 + 2700 × 0.5) / 4950 = 0.49090… → 0.491
+    expect(r.ratePerKmEffective).toBe(0.491);
+  });
+});
+
+// ─── I. long claims ──────────────────────────────────────
+
+describe('calcKmGwarant — long claims', () => {
+  it('32. 3-month claim 02.03–31.05.2026 ⇒ 13 rows, Σ kmInWeek = kmGuaranteed', () => {
+    const LIMITS: Record<string, WeekLimit> = {
+      '2026-W10': { kmPerDay: 540, ratePerKm: 0.5 },
+      '2026-W11': { kmPerDay: 540, ratePerKm: 0.5 },
+      '2026-W12': { kmPerDay: 540, ratePerKm: 0.5 },
+      '2026-W13': { kmPerDay: 540, ratePerKm: 0.5 },
+      '2026-W14': { kmPerDay: 500, ratePerKm: 0.55 },
+      '2026-W15': { kmPerDay: 500, ratePerKm: 0.55 },
+      '2026-W16': { kmPerDay: 500, ratePerKm: 0.55, kmPerSaturday: 250 },
+      '2026-W17': { kmPerDay: 500, ratePerKm: 0.55 },
+      // W18..W22 unconfigured ⇒ fallback 540 @ 0.5
+    };
+    const r = run({ dateStart: '2026-03-02', dateEnd: '2026-05-31', limits: LIMITS });
+
+    expect(r.breakdown.map((w) => w.isoWeek)).toEqual(
+      Array.from({ length: 13 }, (_, i) => `2026-W${String(10 + i).padStart(2, '0')}`),
+    );
+    expect(r.breakdown.map((w) => w.workingDays)).toEqual([
+      5, 5, 5, 5, // W10–W13
+      4, // W14: 03.04 Good Friday
+      4, // W15: 06.04 Easter Monday
+      5, 5, // W16 (+ Saturday 18.04), W17
+      4, // W18: 01.05 Swieto Pracy
+      5, // W19
+      4, // W20: 14.05 Wniebowstapienie
+      5, // W21
+      4, // W22: 25.05 Zielone Swiatki
+    ]);
+    expect(r.breakdown[6]!.saturdayDays).toEqual(['2026-04-18']);
+    // 20 × 540 + (4 + 4 + 5 + 5) × 500 + 250 + 22 × 540 = 10800 + 9250 + 11880
+    expect(r.kmGuaranteed).toBe(31_930);
+    expect(sum(r.breakdown, (w) => w.kmInWeek)).toBe(r.kmGuaranteed);
+    expect(r.totalDays).toBe(61);
+    expect(sum(r.breakdown, (w) => w.workingDays + w.saturdaysCounted)).toBe(r.totalDays);
+    // (10800 × 0.5 + 9250 × 0.55 + 11880 × 0.5) / 31930 = 0.51448… → 0.514
+    expect(r.ratePerKmEffective).toBe(0.514);
+    // Rows tile the period: contiguous, week-clipped.
+    expect(r.breakdown[0]!.periodStart).toBe('2026-03-02');
+    expect(r.breakdown[12]!.periodEnd).toBe('2026-05-31');
+  });
+
+  it('33. docs/14 §18.7.1 example 03.06–02.07.2026 ⇒ 1380 / 2700 / 0 / 300 / 2160 = 6540', () => {
+    const r = run({
+      dateStart: '2026-06-03',
+      dateEnd: '2026-07-02',
+      limits: {
+        '2026-W23': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 300 },
+        '2026-W24': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+        '2026-W25': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
+        '2026-W26': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 300 },
+        '2026-W27': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 300 },
+      },
+    });
+    expect(
+      r.breakdown.map((w) => [w.isoWeek, w.periodStart, w.periodEnd, w.workingDays, w.kmInWeek, weekSaturdayStatus(w)]),
+    ).toEqual([
+      ['2026-W23', '2026-06-03', '2026-06-07', 2, 1_380, 'counted'], // 04.06 Boze Cialo
+      ['2026-W24', '2026-06-08', '2026-06-14', 5, 2_700, 'none'],
+      ['2026-W25', '2026-06-15', '2026-06-21', 5, 0, 'none'],
+      ['2026-W26', '2026-06-22', '2026-06-28', 5, 300, 'counted'],
+      ['2026-W27', '2026-06-29', '2026-07-02', 4, 2_160, 'notCounted'], // Sat 04.07 outside
+    ]);
+    expect(r.breakdown[0]!.excludedDays).toEqual([{ date: '2026-06-04', label: 'Boze Cialo (DE/AT/IT)' }]);
+    expect(r.kmGuaranteed).toBe(6_540);
+    expect(r.totalDays).toBe(23);
+  });
+});
+
+// ─── J. invalid input ────────────────────────────────────
+
+describe('calcKmGwarant — invalid input', () => {
+  it('34. inverted range / impossible date / garbage ⇒ empty result with the fallback rate', () => {
+    const empty = {
+      totalDays: 0,
+      rawTotalDays: 0,
+      kmGuaranteed: 0,
+      ratePerKmEffective: 0.5,
+      breakdown: [],
+      firstDay: null,
+      lastDay: null,
+    };
+    expect(run({ dateStart: '2026-06-14', dateEnd: '2026-06-08' })).toEqual(empty);
+    expect(run({ dateStart: '2026-02-29', dateEnd: '2026-03-06' })).toEqual(empty);
+    expect(run({ dateStart: 'not-a-date', dateEnd: '2026-03-06' })).toEqual(empty);
+    expect(run({ dateStart: '2026-6-8', dateEnd: '2026-06-14' })).toEqual(empty);
+    // The rate is rounded to 3 dp like any effective rate.
+    expect(
+      calcKmGwarant({ dateStart: 'x', dateEnd: 'y', limits: {}, fallback: { kmPerDay: 540, ratePerKm: 0.51234 } })
+        .ratePerKmEffective,
+    ).toBe(0.512);
+  });
+});
+
+// ─── boundary days, Saturday status, invariants ──────────
+
+describe('calcKmGwarant — boundary-day fractions', () => {
+  it('last day on an EU ban (01.05.2026 Fri) with timeTo ⇒ fraction 0', () => {
+    const r = run({ dateStart: '2026-04-27', dateEnd: '2026-05-01', timeTo: '12:00' });
     expect(r.lastDay).toEqual({ date: '2026-05-01', fraction: 0 });
+    expect(r.breakdown[0]).toMatchObject({ isoWeek: '2026-W18', workingDays: 4 });
   });
 
-  it('counted qualifying Saturday boundary → fraction 1 (whole, NOT fractioned by time)', () => {
-    // Feb 7 2026 (Sat, ordinal 1 → qualifies) opens the period; even with a
-    // 12:00 start the Saturday is credited as a WHOLE day (1), never fractioned.
+  it('Saturday without guarantee as a boundary ⇒ fraction 0', () => {
+    const r = run({ dateStart: '2026-06-10', dateEnd: '2026-06-13' });
+    expect(r.lastDay).toEqual({ date: '2026-06-13', fraction: 0 });
+  });
+
+  it('firstDay / lastDay are RAW — before hoursAdjusted', () => {
     const r = run({
-      dateStart: '2026-02-07',
-      dateEnd: '2026-02-09',
-      timeFrom: '12:00',
-      limits: LIMITS_2026_SAT,
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-12',
+      timeFrom: '06:00',
+      timeTo: '12:00',
+      hoursAdjusted: 24,
     });
-    expect(r.firstDay).toEqual({ date: '2026-02-07', fraction: 1 });
-    // Feb 9 (Mon) closes the period as a counted whole weekday.
-    expect(r.lastDay).toEqual({ date: '2026-02-09', fraction: 1 });
+    expect(r.firstDay).toEqual({ date: '2026-06-08', fraction: 0.75 });
+    expect(r.lastDay).toEqual({ date: '2026-06-12', fraction: 0.5 });
+    expect(r.rawTotalDays).toBe(4.25);
+    expect(r.totalDays).toBe(3.25);
   });
+});
 
-  it('feature-off Saturday boundary → fraction 0 (legacy behavior)', () => {
-    // Mar 7 2026 (Sat) opens the period with the odd-Saturday feature OFF
-    // (LIMITS_2026 has no kmPerSaturday) → the Saturday is credited 0.
-    const r = run({ dateStart: '2026-03-07', dateEnd: '2026-03-11' });
-    expect(r.firstDay).toEqual({ date: '2026-03-07', fraction: 0 });
-    expect(r.lastDay).toEqual({ date: '2026-03-11', fraction: 1 });
+describe('weekSaturdayStatus', () => {
+  it('counted / notCounted / none from the row', () => {
+    expect(weekSaturdayStatus({ saturdaysCounted: 1, kmPerSaturday: 270 })).toBe('counted');
+    expect(weekSaturdayStatus({ saturdaysCounted: 0, kmPerSaturday: 270 })).toBe('notCounted');
+    expect(weekSaturdayStatus({ saturdaysCounted: 0, kmPerSaturday: 0 })).toBe('none');
   });
+});
 
-  it('firstDay/lastDay report the RAW pre-hoursAdjusted fraction', () => {
-    // Mar 2 (Mon) → Mar 13 (Fri), 8h downtime correction. `hoursAdjusted` is a
-    // month-level day distribution and must NOT rewrite a per-day fraction, so
-    // both boundary weekdays still report their raw credited 1.
+describe('calcKmGwarant — invariants', () => {
+  it('Σ kmInWeek = kmGuaranteed, Σ days = totalDays and rows tile the period (a whole year)', () => {
     const r = run({
-      dateStart: '2026-03-02',
-      dateEnd: '2026-03-13',
-      hoursAdjusted: 8,
+      dateStart: '2026-01-01',
+      dateEnd: '2026-12-31',
+      timeFrom: '15:00',
+      timeTo: '09:00',
+      hoursAdjusted: 30,
+      limits: {
+        '2026-W10': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 300 },
+        '2026-W20': { kmPerDay: 480, ratePerKm: 0.6, kmPerSaturday: 250 },
+        '2026-W33': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 300 },
+      },
     });
-    // The month total was shaved (see the hoursAdjusted suite) …
-    expect(r.totalDays).toBe(9.67);
-    // … but the boundary days keep their RAW pre-adjustment fraction.
-    expect(r.firstDay).toEqual({ date: '2026-03-02', fraction: 1 });
-    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 1 });
+    expect(r.breakdown).toHaveLength(53);
+    expect(sum(r.breakdown, (w) => w.kmInWeek)).toBe(r.kmGuaranteed);
+    for (const w of r.breakdown) {
+      expect(w.saturdayDays).toHaveLength(w.saturdaysCounted);
+      expect(w.kmInWeek).toBe(Math.round(w.workingDays * w.kmPerDay) + w.kmFromSaturdays);
+      expect(w.periodStart >= w.weekStart && w.periodEnd <= w.weekEnd).toBe(true);
+    }
+    for (let i = 1; i < r.breakdown.length; i += 1) {
+      const prevEnd = new Date(`${r.breakdown[i - 1]!.periodEnd}T00:00:00Z`).getTime();
+      const nextStart = new Date(`${r.breakdown[i]!.periodStart}T00:00:00Z`).getTime();
+      expect(nextStart - prevEnd).toBe(86_400_000);
+    }
   });
+});
 
-  it('invalid / inverted range → both firstDay and lastDay are null', () => {
-    const inverted = run({ dateStart: '2026-03-15', dateEnd: '2026-03-10' });
-    expect(inverted.firstDay).toBeNull();
-    expect(inverted.lastDay).toBeNull();
-
-    const badIso = run({ dateStart: 'not-a-date', dateEnd: '2026-03-15' });
-    expect(badIso.firstDay).toBeNull();
-    expect(badIso.lastDay).toBeNull();
+describe('calcKmGwarant — time-zone independence', () => {
+  it('produces identical results under every process TZ', () => {
+    const input: KmCalcInput = {
+      dateStart: '2026-03-27',
+      dateEnd: '2027-01-05',
+      timeFrom: '07:30',
+      timeTo: '16:45',
+      hoursAdjusted: 10,
+      limits: {
+        '2026-W14': { kmPerDay: 500, ratePerKm: 0.55, kmPerSaturday: 250 },
+        '2026-W44': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 300 },
+        '2026-W53': { kmPerDay: 600, ratePerKm: 0.6, kmPerSaturday: 300 },
+      },
+      fallback: FALLBACK_WEEK_LIMIT,
+    };
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = 'UTC';
+      const baseline = calcKmGwarant(input);
+      // DST-switching zones on both sides of UTC, incl. the 2026-03-29 /
+      // 2026-10-25 EU switches inside the period, and a +14 h zone.
+      for (const tz of ['Europe/Warsaw', 'America/New_York', 'America/Sao_Paulo', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+        process.env.TZ = tz;
+        expect(calcKmGwarant(input)).toEqual(baseline);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
   });
 });
