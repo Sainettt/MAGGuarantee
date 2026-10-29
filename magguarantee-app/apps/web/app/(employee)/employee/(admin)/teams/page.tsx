@@ -1,14 +1,15 @@
 'use client';
 
-// Phase 11 — Admin CRUD «Zespoły prowadzące» (dispatch teams). A numbered team
-// (code `1.1.13`) that vehicles are assigned to; every dispatcher in the team
-// sees the vehicle. Admin-only (lives under the `(admin)` route group) — an
+// Phase 11 — Admin CRUD «Zespoły dyspozytorów» (dispatch teams). A team (one
+// identifier, `name`, e.g. `1.23`) that vehicles are assigned to; every
+// dispatcher in the team sees the vehicle. The planista is NOT part of it — he
+// is picked separately on the vehicle (2026-10-29). Admin-only (lives under the `(admin)` route group) — an
 // explicit replacement for the external "raport DAF" Excel.
 //
 // `Team` uses an `active` flag (NOT a soft-delete). Hard-delete is guarded
 // server-side (409 if referenced by users/vehicles) — deactivate via the
 // `active=false` toggle instead. The row's member roster renders via the
-// shared <TeamMembers showCode={false}> (the row already prints the code, so
+// shared <TeamMembers showName={false}> (the row already prints the name, so
 // the chip is deduped — docs/14 §7.9.6).
 
 import {
@@ -91,35 +92,23 @@ export default function TeamsPage() {
   const columns = useMemo<DataTableColumn<TeamDto>[]>(
     () => [
       {
-        id: 'code',
-        header: t('fields.code'),
-        cell: (row) => (
-          <span className="font-mono font-semibold tabular-nums">
-            {row.code}
-          </span>
-        ),
-      },
-      {
         id: 'name',
         header: t('fields.name'),
-        cell: (row) =>
-          row.name ? (
-            <span className="text-text">{row.name}</span>
-          ) : (
-            <span className="text-text-sub">—</span>
-          ),
+        cell: (row) => (
+          <span className="font-semibold text-text">{row.name}</span>
+        ),
       },
       {
         id: 'dispatchers',
         header: t('fields.dispatchers'),
-        // The row already prints the code → suppress the chip (showCode=false),
-        // but the name + member roster still render (docs/14 §7.9.6).
+        // The row already prints the name → suppress the chip (showName=false);
+        // the member roster still renders (docs/14 §7.9.6).
         cell: (row) => (
           <TeamMembers
             team={row}
             variant="list"
             size="md"
-            showCode={false}
+            showName={false}
           />
         ),
       },
@@ -179,7 +168,7 @@ export default function TeamsPage() {
           return (
             <div className="flex items-center justify-end">
               <RowActionsMenu
-                label={`${tCommon('actions')} — ${row.code}`}
+                label={`${tCommon('actions')} — ${row.name}`}
                 actions={actions}
               />
             </div>
@@ -273,8 +262,8 @@ export default function TeamsPage() {
         }
         body={
           isToggleActive
-            ? t('confirmToggle.deactivateBody', { code: toggleTarget?.code ?? '' })
-            : t('confirmToggle.reactivateBody', { code: toggleTarget?.code ?? '' })
+            ? t('confirmToggle.deactivateBody', { name: toggleTarget?.name ?? '' })
+            : t('confirmToggle.reactivateBody', { name: toggleTarget?.name ?? '' })
         }
         confirmLabel={
           isToggleActive
@@ -302,7 +291,7 @@ export default function TeamsPage() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         entityLabel={tConfirm('entityLabel.team')}
-        entityName={deleteTarget?.code ?? ''}
+        entityName={deleteTarget?.name ?? ''}
         isLoading={hardDeleteM.isPending}
         onConfirm={async (reason) => {
           if (!deleteTarget) return;

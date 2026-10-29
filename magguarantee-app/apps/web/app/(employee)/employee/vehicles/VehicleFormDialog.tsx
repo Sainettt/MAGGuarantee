@@ -585,8 +585,7 @@ export function VehicleFormDialog({
                     <option value="">—</option>
                     {(teamsQ.data ?? []).map((team) => (
                       <option key={team.id} value={team.id}>
-                        {team.code}
-                        {team.name ? ` — ${team.name}` : ''}
+                        {team.name}
                         {team.active ? '' : ` (${tCommon('inactive')})`}
                       </option>
                     ))}

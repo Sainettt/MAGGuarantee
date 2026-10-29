@@ -573,7 +573,8 @@ model CarrierAttachment {
 }
 
 // ─── TEAMS (dispatch teams — Phase 11) ──────────────────
-// A numbered dispatch team (code like `1.1.13`) that a vehicle is assigned to.
+// A dispatch team («zespół dyspozytorów», named e.g. `1.23`) that a vehicle is
+// assigned to. 2026-10-29: the team carries ONE identifier, `name`.
 // Mirrors the real MAGTRANS process: in the external maciosoft (Sped Trans)
 // system a vehicle is attached to a whole team, not a single person — formerly
 // tracked by hand in an Excel "raport DAF". In MAGGuarantee the team catalog is
@@ -588,11 +589,12 @@ model CarrierAttachment {
 // the API layer (a team referenced by users/vehicles must not be removed).
 model Team {
   id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  // Team code, e.g. `1.1.13`. Globally unique. The `^\d+\.\d+\.\d+$` format is
-  // validated in the API/Zod layer — at the DB level it is just a unique String.
-  code   String  @unique
-  // Optional human-readable label.
-  name   String?
+  // Team name («Nazwa zespołu») — the single identifier the admin types.
+  // 2026-10-29: the former `code` (strict N.N.N) + optional `name` pair was
+  // collapsed into this one required, globally unique, free-form field
+  // (migration `20261029120000_team_single_name`). MAGTRANS numbers its
+  // dispatch teams (`1.23`), but that is a convention, not a rule.
+  name   String  @unique
   active Boolean @default(true)
 
   // 1:N — the dispatchers (role=dyspozytor) that make up the team. Usually 2

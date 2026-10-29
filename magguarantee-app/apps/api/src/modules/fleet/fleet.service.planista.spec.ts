@@ -398,7 +398,6 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
           dispatchTeamId: 'team-1',
           dispatchTeam: {
             id: 'team-1',
-            code: '1.1.13',
             name: 'Zespół 1.1.13',
             active: true,
             dispatchers: [{ id: 'd-1', login: 'd1', name: 'Disp One' }],
@@ -446,7 +445,6 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       notes: 'serwis co 30 tys.',
       dispatchTeam: {
         id: 'team-1',
-        code: '1.1.13',
         name: 'Zespół 1.1.13',
         active: true,
         dispatchers: [{ id: 'd-1', login: 'd1', name: 'Disp One' }],

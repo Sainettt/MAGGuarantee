@@ -67,7 +67,7 @@
       "driver": "kierowca",
       "trailer": "naczepa",
       "trailerType": "typ naczepy",
-      "team": "zespół prowadzący"
+      "team": "zespół dyspozytorów"
     }
   },
   "users": {
@@ -445,7 +445,7 @@
         "manage": "Zarządzanie logowaniem Google"
       },
       "teams": {
-        "manage": "Zarządzanie zespołami prowadzącymi"
+        "manage": "Zarządzanie zespołami dyspozytorów"
       },
       "trailer_types": {
         "manage": "Zarządzanie typami naczep"
@@ -476,7 +476,7 @@
     "drivers": "Kierowcy",
     "trailers": "Naczepy",
     "trailerTypes": "Typy naczep",
-    "teams": "Zespoły prowadzące",
+    "teams": "Zespoły dyspozytorów",
     "delegations": "Wyjazdy",
     "limits": "Limity",
     "users": "Użytkownicy",
@@ -728,7 +728,7 @@
       "certificateL": "Certyfikat L",
       "opiekun": "Opiekun",
       "planner": "Planista",
-      "dispatchTeam": "Zespół prowadzący",
+      "dispatchTeam": "Zespół dyspozytorów",
       "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
       "fuelCardNumber": "Numer karty",
@@ -947,33 +947,31 @@
   },
   "team": {
     "emptyMembers": "Brak dyspozytorów w zespole",
-    "noTeam": "Brak zespołu prowadzącego",
+    "noTeam": "Brak zespołu dyspozytorów",
     "inactiveBadge": "Nieaktywny",
     "leadingTeamHeader": "ZESPÓŁ PROWADZĄCY",
     "planista": "Planista",
     "eksport": "Eksport",
-    "codeAria": "Kod zespołu: {code}",
-    "membersAria": "Dyspozytorzy zespołu {code}",
+    "nameAria": "Zespół: {name}",
+    "membersAria": "Dyspozytorzy zespołu {name}",
     "planistaNow": "Ciągnik prowadzi obecnie: {name}"
   },
   "teams": {
-    "title": "Zespoły prowadzące",
-    "subtitle": "Numerowane zespoły dyspozytorów, do których przypisywane są ciągniki.",
+    "title": "Zespoły dyspozytorów",
+    "subtitle": "Zespoły dyspozytorów, do których przypisywane są ciągniki. Planistę ciągnika wybiera się osobno.",
     "newTeam": "Nowy zespół",
     "editTeam": "Edytuj zespół",
     "emptyTitle": "Brak zespołów",
-    "emptyMessage": "Nie zdefiniowano jeszcze żadnego zespołu prowadzącego.",
+    "emptyMessage": "Nie zdefiniowano jeszcze żadnego zespołu dyspozytorów.",
     "emptyFiltered": {
       "title": "Brak wyników",
       "message": "Brak zespołów spełniających wyszukiwanie."
     },
     "filters": {
-      "searchPlaceholder": "Szukaj kodu lub nazwy"
+      "searchPlaceholder": "Szukaj zespołu"
     },
     "fields": {
-      "code": "Kod",
-      "codeHint": "Format N.N.N, np. 1.1.13",
-      "name": "Nazwa",
+      "name": "Nazwa zespołu",
       "dispatchers": "Dyspozytorzy",
       "dispatchersHint": "Dyspozytorzy widzą ciągniki przypisane do tego zespołu.",
       "dispatchersPlaceholder": "Wybierz dyspozytorów…",
@@ -988,9 +986,9 @@
     },
     "confirmToggle": {
       "deactivateTitle": "Dezaktywować zespół?",
-      "deactivateBody": "Zespół {code} nie będzie dostępny do przypisania, ale dane pozostaną w systemie.",
+      "deactivateBody": "Zespół {name} nie będzie dostępny do przypisania, ale dane pozostaną w systemie.",
       "reactivateTitle": "Aktywować zespół?",
-      "reactivateBody": "Zespół {code} ponownie będzie dostępny do przypisania."
+      "reactivateBody": "Zespół {name} ponownie będzie dostępny do przypisania."
     }
   },
   "validation": {
@@ -1305,7 +1303,7 @@
       "Carrier": "Przewoźnik",
       "CarrierAttachment": "Załącznik przewoźnika",
       "User": "Użytkownik",
-      "Team": "Zespół prowadzący",
+      "Team": "Zespół dyspozytorów",
       "Vehicle": "Ciągnik",
       "VehicleAttachment": "Załącznik ciągnika",
       "Trailer": "Naczepa",

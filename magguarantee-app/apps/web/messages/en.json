@@ -67,7 +67,7 @@
       "driver": "driver",
       "trailer": "trailer",
       "trailerType": "trailer type",
-      "team": "leading team"
+      "team": "dispatch team"
     }
   },
   "users": {
@@ -445,7 +445,7 @@
         "manage": "Manage Google sign-in"
       },
       "teams": {
-        "manage": "Manage leading teams"
+        "manage": "Manage dispatch teams"
       },
       "trailer_types": {
         "manage": "Manage trailer types"
@@ -476,7 +476,7 @@
     "drivers": "Drivers",
     "trailers": "Trailers",
     "trailerTypes": "Trailer types",
-    "teams": "Leading teams",
+    "teams": "Dispatch teams",
     "delegations": "Trips",
     "limits": "Limits",
     "users": "Users",
@@ -728,7 +728,7 @@
       "certificateL": "Certificate L",
       "opiekun": "Caretaker",
       "planner": "Planner",
-      "dispatchTeam": "Leading team",
+      "dispatchTeam": "Dispatch team",
       "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
       "fuelCardNumber": "Card number",
@@ -947,33 +947,31 @@
   },
   "team": {
     "emptyMembers": "No dispatchers in this team",
-    "noTeam": "No leading team assigned",
+    "noTeam": "No dispatch team assigned",
     "inactiveBadge": "Inactive",
     "leadingTeamHeader": "LEADING TEAM",
     "planista": "Planner",
     "eksport": "Export",
-    "codeAria": "Team code: {code}",
-    "membersAria": "Dispatchers of team {code}",
+    "nameAria": "Team: {name}",
+    "membersAria": "Dispatchers of team {name}",
     "planistaNow": "Now planned by: {name}"
   },
   "teams": {
-    "title": "Leading teams",
-    "subtitle": "Numbered dispatcher teams that vehicles are assigned to.",
+    "title": "Dispatch teams",
+    "subtitle": "Dispatcher teams that vehicles are assigned to. The vehicle's planner is picked separately.",
     "newTeam": "New team",
     "editTeam": "Edit team",
     "emptyTitle": "No teams yet",
-    "emptyMessage": "No leading teams have been defined yet.",
+    "emptyMessage": "No dispatch teams have been defined yet.",
     "emptyFiltered": {
       "title": "No results",
       "message": "No teams match your search."
     },
     "filters": {
-      "searchPlaceholder": "Search by code or name"
+      "searchPlaceholder": "Search teams"
     },
     "fields": {
-      "code": "Code",
-      "codeHint": "Format N.N.N, e.g. 1.1.13",
-      "name": "Name",
+      "name": "Team name",
       "dispatchers": "Dispatchers",
       "dispatchersHint": "Dispatchers see vehicles assigned to this team.",
       "dispatchersPlaceholder": "Select dispatchers…",
@@ -988,9 +986,9 @@
     },
     "confirmToggle": {
       "deactivateTitle": "Deactivate team?",
-      "deactivateBody": "Team {code} will no longer be available for assignment, but its data stays in the system.",
+      "deactivateBody": "Team {name} will no longer be available for assignment, but its data stays in the system.",
       "reactivateTitle": "Activate team?",
-      "reactivateBody": "Team {code} will be available for assignment again."
+      "reactivateBody": "Team {name} will be available for assignment again."
     }
   },
   "validation": {
@@ -1305,7 +1303,7 @@
       "Carrier": "Carrier",
       "CarrierAttachment": "Carrier attachment",
       "User": "User",
-      "Team": "Leading team",
+      "Team": "Dispatch team",
       "Vehicle": "Vehicle",
       "VehicleAttachment": "Vehicle attachment",
       "Trailer": "Trailer",

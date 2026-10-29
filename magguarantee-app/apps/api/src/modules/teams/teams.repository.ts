@@ -19,11 +19,13 @@ export interface TeamDispatcherRow {
  * NO `deletedAt` soft-delete (per docs/04-data-model.md), so this repository
  * never filters on `deletedAt` and the model is NOT in the soft-delete
  * extension's model list.
+ *
+ * `name` is the team's single identifier («Nazwa zespołu», unique) — the
+ * former `code` + optional `name` pair was collapsed on 2026-10-29.
  */
 export interface TeamRow {
   id: string;
-  code: string;
-  name: string | null;
+  name: string;
   active: boolean;
   dispatchers: TeamDispatcherRow[];
   /** Count of vehicles currently assigned to this team. */
@@ -49,9 +51,9 @@ export class TeamsRepository {
     return row ? this.flatten(row) : null;
   }
 
-  async findByCode(code: string): Promise<TeamRow | null> {
+  async findByName(name: string): Promise<TeamRow | null> {
     const row = await this.prisma.tx.team.findUnique({
-      where: { code },
+      where: { name },
       ...this.queryShape(),
     });
     return row ? this.flatten(row) : null;
@@ -61,28 +63,20 @@ export class TeamsRepository {
     const where: Record<string, unknown> = {};
     if (typeof filters.active === 'boolean') where.active = filters.active;
     if (filters.q) {
-      where.OR = [
-        { code: { contains: filters.q, mode: 'insensitive' } },
-        { name: { contains: filters.q, mode: 'insensitive' } },
-      ];
+      where.name = { contains: filters.q, mode: 'insensitive' };
     }
     const rows = await this.prisma.tx.team.findMany({
       where,
-      orderBy: { code: 'asc' },
+      orderBy: { name: 'asc' },
       ...this.queryShape(),
     });
     return rows.map((r) => this.flatten(r));
   }
 
-  async create(data: {
-    code: string;
-    name?: string | null;
-    active?: boolean;
-  }): Promise<TeamRow> {
+  async create(data: { name: string; active?: boolean }): Promise<TeamRow> {
     const row = await this.prisma.tx.team.create({
       data: {
-        code: data.code,
-        name: data.name ?? null,
+        name: data.name,
         active: data.active ?? true,
       },
       ...this.queryShape(),
@@ -92,7 +86,7 @@ export class TeamsRepository {
 
   async update(
     id: string,
-    data: Partial<{ code: string; name: string | null; active: boolean }>,
+    data: Partial<{ name: string; active: boolean }>,
   ): Promise<TeamRow> {
     const row = await this.prisma.tx.team.update({
       where: { id },
@@ -177,7 +171,6 @@ export class TeamsRepository {
   private flatten(row: TeamPrismaShape): TeamRow {
     return {
       id: row.id,
-      code: row.code,
       name: row.name,
       active: row.active,
       dispatchers: (row.dispatchers ?? []).map((d) => ({
@@ -195,8 +188,7 @@ export class TeamsRepository {
 
 interface TeamPrismaShape {
   id: string;
-  code: string;
-  name: string | null;
+  name: string;
   active: boolean;
   dispatchers?: { id: string; name: string | null; login: string; active: boolean }[];
   _count?: { vehicles: number };

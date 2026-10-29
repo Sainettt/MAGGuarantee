@@ -307,8 +307,7 @@ function makeUsersRepo(seed: UserRow[] = []): UsersRepository {
 function makeTeam(overrides: Partial<TeamRow> = {}): TeamRow {
   return {
     id: 't-1',
-    code: '1.1.13',
-    name: 'Zespół 1.1.13',
+    name: '1.1.13',
     active: true,
     dispatchers: [],
     vehicleCount: 0,

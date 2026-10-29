@@ -2,11 +2,15 @@
 
 // Phase 11 — <TeamMembers> (docs/14-design-system.md §7.9).
 //
-// The SINGLE source of truth for rendering a dispatch team's identity (code
-// chip + name) and its member dispatchers, wherever a team is shown across the
-// app (six contexts — §7.9.6). It replaces ad-hoc "list the dispatchers inline"
+// The SINGLE source of truth for rendering a dispatch team's identity (name
+// chip) and its member dispatchers, wherever a team is shown across the app
+// (six contexts — §7.9.6). It replaces ad-hoc "list the dispatchers inline"
 // markup so the three states (members / empty team / inactive team) look
 // identical everywhere.
+//
+// 2026-10-29 — a team carries ONE identifier, `name` («Nazwa zespołu»); the
+// former `code` chip + optional `name` pair collapsed into a single name chip
+// (`showCode` → `showName`, same dedup rule).
 //
 // FIELD NOTE: a team member carries a single nullable `name` plus a `login`
 // (NOT firstName/lastName — the §7.9.5 doc predates the final DTO). The display
@@ -30,7 +34,7 @@ export type TeamMember = VehicleDispatchTeamDto['dispatchers'][number];
 /** The team identity + roster fed to <TeamMembers> (= `Vehicle.dispatchTeam`). */
 export type TeamMembersTeam = Pick<
   VehicleDispatchTeamDto,
-  'code' | 'name' | 'active' | 'dispatchers'
+  'name' | 'active' | 'dispatchers'
 >;
 
 export interface TeamMembersProps {
@@ -40,11 +44,11 @@ export interface TeamMembersProps {
   /** `md` (default) — modals/panels/admin. `sm` — inline previews/tight cells. */
   size?: 'sm' | 'md';
   /**
-   * `true` (default) — render the code chip. A host that already prints the
-   * code in its own header may pass `false` to dedup; identity is NEVER hidden,
-   * so when `name` is also null the chip renders anyway (§7.9.5).
+   * `true` (default) — render the name chip. A host that already prints the
+   * team name in its own row/header may pass `false` to dedup. The inactive
+   * badge still renders either way, so the state is never hidden (§7.9.5).
    */
-  showCode?: boolean;
+  showName?: boolean;
   className?: string;
 }
 
@@ -57,7 +61,7 @@ export function TeamMembers({
   team,
   variant = 'chips',
   size = 'md',
-  showCode = true,
+  showName = true,
   className,
 }: TeamMembersProps) {
   const t = useTranslations('team');
@@ -65,53 +69,53 @@ export function TeamMembers({
   const isSm = size === 'sm';
   const isInactive = team.active === false;
   const isEmpty = team.dispatchers.length === 0;
+  const hasIdentityLine = showName || isInactive;
 
-  // Identity never disappears: even with showCode=false, fall back to the chip
-  // when there is no name to stand in for it (§7.9.5).
-  const renderCode = showCode || !team.name;
-  const codeChipClass = cn(
-    'inline-flex items-center rounded-md bg-input px-1.5 py-0.5 font-mono tabular-nums text-text',
+  const nameChipClass = cn(
+    'inline-flex items-center rounded-md bg-input px-1.5 py-0.5 font-semibold text-text',
     isSm ? 'text-xs' : 'text-sm',
+    isInactive && 'opacity-70',
   );
-  const nameClass = cn('text-text', isSm ? 'text-xs' : 'text-sm');
+  // No identity line (host prints the name, team active) → no stray top gap.
+  const memberGap = hasIdentityLine ? 'mt-2' : '';
 
   return (
     <div className={cn('min-w-0', className)}>
-      {/* ── Identity line: code chip + name + inactive badge ── */}
-      {/* The badge sits OUTSIDE the dimmed subtree so it stays full-contrast. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div
-          className={cn(
-            'flex flex-wrap items-center gap-2',
-            isInactive && 'opacity-70',
-          )}
-        >
-          {renderCode && (
-            <span className={codeChipClass} aria-label={t('codeAria', { code: team.code })}>
-              {team.code}
+      {/* ── Identity line: name chip + inactive badge ── */}
+      {/* The badge sits OUTSIDE the dimmed chip so it stays full-contrast. */}
+      {hasIdentityLine && (
+        <div className="flex flex-wrap items-center gap-2">
+          {showName && (
+            <span
+              className={nameChipClass}
+              aria-label={t('nameAria', { name: team.name })}
+            >
+              {team.name}
             </span>
           )}
-          {team.name ? <span className={nameClass}>{team.name}</span> : null}
+          {isInactive && (
+            <Badge variant="muted">{t('inactiveBadge')}</Badge>
+          )}
         </div>
-        {isInactive && (
-          <Badge variant="muted">{t('inactiveBadge')}</Badge>
-        )}
-      </div>
+      )}
 
       {/* ── Member area ── */}
       {isEmpty ? (
         // Amber soft-warning box. EXEMPT from the inactive dim — `opacity-100`
         // counters any inherited dim so it always clears AA (§7.9.3).
         <div
-          className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-bold text-warning opacity-100"
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-bold text-warning opacity-100',
+            memberGap,
+          )}
         >
           <AlertTriangle size={12} aria-hidden="true" />
           {t('emptyMembers')}
         </div>
       ) : variant === 'list' ? (
         <ul
-          className={cn('mt-2 flex flex-col gap-1.5', isInactive && 'opacity-70')}
-          aria-label={t('membersAria', { code: team.code })}
+          className={cn('flex flex-col gap-1.5', memberGap, isInactive && 'opacity-70')}
+          aria-label={t('membersAria', { name: team.name })}
         >
           {team.dispatchers.map((member) => (
             <li key={member.id} className="flex items-center gap-2">
@@ -125,8 +129,8 @@ export function TeamMembers({
       ) : (
         <div
           role="list"
-          aria-label={t('membersAria', { code: team.code })}
-          className={cn('mt-2 flex flex-wrap gap-2', isInactive && 'opacity-70')}
+          aria-label={t('membersAria', { name: team.name })}
+          className={cn('flex flex-wrap gap-2', memberGap, isInactive && 'opacity-70')}
         >
           {team.dispatchers.map((member) => (
             <span

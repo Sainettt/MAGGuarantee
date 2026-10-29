@@ -4,11 +4,15 @@
 //   - `team === null` → create (POST /teams)
 //   - `team` set      → edit  (PATCH /teams/:id)
 //
-// Fields: `code` (format `N.N.N`, e.g. `1.1.13` — validated by the shared
-// `CreateTeamSchema` via the same regex the API uses), optional `name`,
-// `active`, and the dispatcher membership (`dispatcherIds`, a <MultiSelect> of
-// the `dyspozytor`-role users). On edit, `dispatcherIds` is a FULL replacement
-// of the team's roster — dispatchers removed here are detached server-side.
+// Fields: `name` («Nazwa zespołu» — the team's single identifier: required,
+// unique, free-form; validated by the shared `CreateTeamSchema`), `active`,
+// and the dispatcher membership (`dispatcherIds`, a <MultiSelect> of the
+// `dyspozytor`-role users). On edit, `dispatcherIds` is a FULL replacement of
+// the team's roster — dispatchers removed here are detached server-side.
+//
+// 2026-10-29 — the former `code` (strict N.N.N) + optional `name` pair was
+// collapsed into this one field: the catalog holds dispatcher teams only (the
+// planista is picked separately on the vehicle), so a second label was noise.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
@@ -50,14 +54,13 @@ interface Props {
 }
 
 type FormValues = {
-  code: string;
   name: string;
   active: boolean;
   dispatcherIds: string[];
 };
 
 function getDefaults(): FormValues {
-  return { code: '', name: '', active: true, dispatcherIds: [] };
+  return { name: '', active: true, dispatcherIds: [] };
 }
 
 export function TeamSheet({ open, team, onClose }: Props) {
@@ -76,7 +79,8 @@ export function TeamSheet({ open, team, onClose }: Props) {
   });
 
   // Persist create-mode drafts. `sanitize` drops any stale key no longer in the
-  // form shape so a strict-schema reject can't be triggered by an old draft.
+  // form shape (e.g. the pre-2026-10-29 `code`) so a strict-schema reject can't
+  // be triggered by an old draft.
   const draft = useFormDraft(form, DRAFT_KEY, {
     enabled: !isEdit,
     sanitize: (raw) => {
@@ -91,8 +95,7 @@ export function TeamSheet({ open, team, onClose }: Props) {
     if (!open) return;
     if (isEdit && team) {
       form.reset({
-        code: team.code,
-        name: team.name ?? '',
+        name: team.name,
         active: team.active,
         dispatcherIds: team.dispatchers.map((d) => d.id),
       });
@@ -121,9 +124,7 @@ export function TeamSheet({ open, team, onClose }: Props) {
 
   const onSubmit = form.handleSubmit((values) => {
     const body = {
-      code: values.code.trim(),
-      // Empty name → omit on create, explicit null on edit (clear it).
-      name: values.name.trim() || (isEdit ? null : undefined),
+      name: values.name.trim(),
       active: values.active,
       dispatcherIds: values.dispatcherIds,
     };
@@ -131,12 +132,7 @@ export function TeamSheet({ open, team, onClose }: Props) {
     if (isEdit && team) {
       updateM.mutate({ id: team.id, body: body as UpdateTeamDto });
     } else {
-      const { name, ...rest } = body;
-      const createBody = {
-        ...rest,
-        ...(name == null ? {} : { name }),
-      } as CreateTeamDto;
-      createM.mutate(createBody);
+      createM.mutate(body as CreateTeamDto);
     }
   });
 
@@ -160,29 +156,15 @@ export function TeamSheet({ open, team, onClose }: Props) {
           <SheetHeader>
             <SheetTitle>{isEdit ? t('editTeam') : t('newTeam')}</SheetTitle>
             <SheetDescription>
-              {isEdit ? team?.code : null}
+              {isEdit ? team?.name : null}
             </SheetDescription>
           </SheetHeader>
 
           <SheetBody>
             <div className="space-y-4">
               <FormField
-                label={t('fields.code')}
-                required
-                error={errs.code?.message}
-                htmlFor="team-code"
-                description={t('fields.codeHint')}
-              >
-                <Input
-                  id="team-code"
-                  placeholder="1.1.13"
-                  className="font-mono tabular-nums"
-                  {...form.register('code')}
-                />
-              </FormField>
-
-              <FormField
                 label={t('fields.name')}
+                required
                 error={errs.name?.message}
                 htmlFor="team-name"
               >

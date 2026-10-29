@@ -3,11 +3,18 @@
 // Source of truth for `/api/v1/teams/*` (admin CRUD) and `/api/v1/lookups/teams`
 // per docs/13-api-design.md#teams-admin-only.
 //
-// A `Team` is a numbered dispatch team (code like `1.1.13`) that vehicles are
+// A `Team` is a dispatch team («zespół dyspozytorów») that vehicles are
 // assigned to. It replaces the legacy single `Vehicle.dispatcherId` FK: a
 // vehicle now belongs to a whole team, and every dispatcher in the team
 // (usually 2 by shift) sees it. Maintained by `admin` — an explicit
 // replacement for the external "raport DAF" Excel.
+//
+// 2026-10-29 — the team carries ONE identifier, `name` («Nazwa zespołu»):
+// required, trimmed, globally unique, free-form. The earlier `code` (strict
+// `N.N.N`) + optional `name` pair came from the SPED "zespół prowadzący"
+// (dispatch team + planista) which this catalog is NOT — here the planista is
+// picked separately on the vehicle, so a second label was noise. MAGTRANS
+// numbers its dispatch teams (`1.23`), but no format is enforced.
 //
 // `Team` uses an `active` flag (NOT a `deletedAt` soft-delete), per
 // docs/04-data-model.md. Hard-delete is guarded at the API layer: a team
@@ -16,30 +23,25 @@
 
 import { z } from 'zod';
 
-import { IsoDateTimeSchema, UuidSchema, emptyStringToUndefined } from './common';
+import { IsoDateTimeSchema, UuidSchema } from './common';
 
 // ─── Field primitives ────────────────────────────────────
 
 /**
- * Team code, e.g. `1.1.13` — EXACTLY three dot-separated numeric segments.
- * Globally unique (DB-level UNIQUE → P2002 → 409). The format is validated
- * here at the Zod layer; the DB stores it as a plain unique String.
+ * Team name, e.g. `1.23` or `Zespół Wschód` — the single identifier of a
+ * dispatch team. Required, trimmed, globally unique (DB-level UNIQUE → P2002
+ * → 409). No format is enforced.
  */
-export const TeamCodeSchema = z
+export const TeamNameSchema = z
   .string()
   .trim()
-  .regex(/^\d+\.\d+\.\d+$/, 'Kod zespołu musi mieć format N.N.N (np. 1.1.13)');
-
-/** Optional human-readable label for the team. */
-const TeamNameSchema = emptyStringToUndefined(
-  z.string().trim().max(120).optional(),
-);
+  .min(1, 'Nazwa zespołu jest wymagana')
+  .max(64);
 
 // ─── Create ──────────────────────────────────────────────
 
 export const CreateTeamSchema = z
   .object({
-    code: TeamCodeSchema,
     name: TeamNameSchema,
     active: z.boolean().optional(),
     /**
@@ -57,8 +59,7 @@ export type CreateTeamDto = z.infer<typeof CreateTeamSchema>;
 
 export const UpdateTeamSchema = z
   .object({
-    code: TeamCodeSchema.optional(),
-    name: emptyStringToUndefined(z.string().trim().max(120).nullable().optional()),
+    name: TeamNameSchema.optional(),
     active: z.boolean().optional(),
     /**
      * Full replacement of the team's dispatcher membership when present:
@@ -112,8 +113,7 @@ export type TeamDispatcherWithActiveDto = z.infer<
  */
 export const TeamDtoSchema = z.object({
   id: UuidSchema,
-  code: z.string(),
-  name: z.string().nullable(),
+  name: z.string(),
   active: z.boolean(),
   dispatchers: z.array(TeamDispatcherSchema),
   /** Count of vehicles currently assigned to this team (read-time aggregate). */
@@ -129,15 +129,14 @@ export type TeamListDto = z.infer<typeof TeamListSchema>;
 // ─── Lookup DTO (/lookups/teams) ─────────────────────────
 
 /**
- * Compact team for the `/lookups/teams` dropdown — `{ id, code, name, active,
+ * Compact team for the `/lookups/teams` dropdown — `{ id, name, active,
  * dispatchers: [{ id, name, login, active }] }`. The web vehicle-form renders a
  * member preview from this without a second round-trip (so it includes the
  * dispatcher `active` flag, unlike the admin-grid roster).
  */
 export const LookupTeamSchema = z.object({
   id: UuidSchema,
-  code: z.string(),
-  name: z.string().nullable(),
+  name: z.string(),
   active: z.boolean(),
   dispatchers: z.array(TeamDispatcherWithActiveSchema),
 });
@@ -150,15 +149,14 @@ export type LookupTeamListDto = z.infer<typeof LookupTeamListSchema>;
 
 /**
  * The dispatch team as embedded on a Vehicle DTO / slim list-item — `{ id,
- * code, name, active, dispatchers: [{ id, name, login }] }`. NON-SENSITIVE
- * (no rates) so it is safe to additively widen the slim `VehicleListItem` (the
+ * name, active, dispatchers: [{ id, name, login }] }`. NON-SENSITIVE (no
+ * rates) so it is safe to additively widen the slim `VehicleListItem` (the
  * dyspozytor panel + FleetVehicleDetailModal) as well as the full `VehicleDto`.
  * `null` when the vehicle is not assigned to any team.
  */
 export const VehicleDispatchTeamSchema = z.object({
   id: UuidSchema,
-  code: z.string(),
-  name: z.string().nullable(),
+  name: z.string(),
   active: z.boolean(),
   dispatchers: z.array(TeamDispatcherSchema),
 });

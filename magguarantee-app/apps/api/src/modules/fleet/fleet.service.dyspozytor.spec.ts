@@ -92,7 +92,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     dispatchTeamId: 'team-1',
     dispatchTeam: {
       id: 'team-1',
-      code: '1.1.13',
       name: 'Zespół 1.1.13',
       active: true,
       dispatchers: [{ id: 'dys-self', login: 'dys', name: 'Dispatcher One' }],
