@@ -1458,6 +1458,9 @@ model VehiclePlannerAssignment {
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────
 
+// SUPERSEDED by WeeklyLimit (2026-10-29): still read by the api until stage 3,
+// dropped by its own migration in stage 5 (docs/17 «Доработка (2026-10-29)»).
+//
 // Per-month guarantee configuration, keyed by (year, month).
 //
 // THREE-VALUED SEMANTICS of `kmPerDay` / `ratePerKm` / `kmPerSaturday`
@@ -1512,6 +1515,60 @@ model MonthlyLimit {
 
   @@unique([year, month])
   @@map("monthly_limits")
+}
+
+// Per-ISO-week guarantee configuration, keyed by (isoYear, isoWeek) — replaces
+// MonthlyLimit from 2026-10-29 (docs/17 «Доработка (2026-10-29)»).
+//
+// ISO 8601 week: Monday–Sunday, numbered 1..52/53, belongs to the year of its
+// THURSDAY — so `isoYear` differs from the calendar year of the Monday for
+// W01 / W52 / W53 at the year boundary (2026-W01 = 29.12.2025–04.01.2026).
+// `isoWeek ≤ weeks in isoYear` (52 or 53) is checked by the api / Zod, not here.
+//
+// THREE-VALUED SEMANTICS — unchanged from MonthlyLimit (2026-09-20), now per
+// week:
+//
+//   no row / NULL → week NOT configured → the api substitutes a fallback
+//                   (540 km/day, 0.5 EUR/km; for the Saturday — 0)
+//   0             → guarantee deliberately switched OFF by an admin
+//                   → 0 km credited for that week
+//   > 0           → the configured value, used as-is
+//
+//   1. The EXISTENCE of the row is the only signal that an admin consciously
+//      configured the week. A week with no row is NOT "off" — it gets the
+//      540 / 0.5 fallback.
+//   2. The fallback is owned by the api (km-calc / limits), NOT by the DB. The
+//      three value columns have NO `@default` and must never get one: a default
+//      would make NULL indistinguishable from `0` — see docs/12
+//      §"LIMITY KM → WeeklyLimit".
+//   3. The fallback is substituted PER FIELD: `kmPerDay = 0` + `ratePerKm =
+//      NULL` ⇒ 0 km priced at the 0.5 fallback rate. A row with all three
+//      columns NULL is equivalent to no row.
+//
+// Rows that existed before 2026-10-29 were unrolled from `monthly_limits` by
+// migration 20261029120000_weekly_limits (pure SQL, rules in docs/12 «Перенос
+// `monthly_limits` → `weekly_limits`»).
+model WeeklyLimit {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  isoYear       Int // ISO week-numbering year (≠ calendar year of the Monday for W01/W52/W53)
+  isoWeek       Int // 1..53; ≤ weeks in isoYear — checked by the api / Zod
+  // NULL = week not configured → api fallback 540 km/day (Mon–Fri). `0` =
+  // guarantee consciously OFF for the week ⇒ 0 km.
+  kmPerDay      Decimal? @db.Decimal(8, 2)
+  // NULL = not configured → api fallback 0.5 EUR/km. `0` = priced at zero, a
+  // deliberate admin choice. Also prices this week's Saturday (no separate rate).
+  ratePerKm     Decimal? @db.Decimal(6, 4)
+  // Guarantee km credited for THIS week's Saturday, priced at `ratePerKm`.
+  // Unlike `kmPerDay`, NULL and `0` are behaviourally IDENTICAL (both = the
+  // Saturday is not paid) since the Saturday fallback is 0 anyway. The fallback
+  // is owned by the api, NOT the DB — no default.
+  kmPerSaturday Decimal? @db.Decimal(8, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([isoYear, isoWeek])
+  @@map("weekly_limits")
 }
 
 // ─── AUDIT LOG ──────────────────────────────────────────

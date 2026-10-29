@@ -1,8 +1,9 @@
 // Production bootstrap — run ONCE manually via `npm run seed:prod`.
 //
 // Seeds ONLY the reference data a fresh production database needs to boot
-// (AppConfig keys, TrailerType catalog, MonthlyLimit placeholders, the
-// stanowisko → role mapping the Google SSO reads) plus the first admin account.
+// (AppConfig keys, TrailerType catalog, MonthlyLimit and WeeklyLimit
+// placeholders, the stanowisko → role mapping the Google SSO reads) plus the
+// first admin account.
 // NO fake users, NO demo carrier/vehicle/teams.
 //
 // Idempotent: every write is an upsert, so an accidental re-run is a no-op. In
@@ -24,6 +25,7 @@ import {
   seedMonthlyLimits,
   seedStanowiskoRoles,
   seedTrailerTypes,
+  seedWeeklyLimits,
 } from './seed-data';
 
 const prisma = new PrismaClient();
@@ -73,6 +75,7 @@ async function main(): Promise<void> {
   const configCount = await seedAppConfig(prisma);
   const trailerTypeCount = await seedTrailerTypes(prisma);
   const monthlyLimitCount = await seedMonthlyLimits(prisma);
+  const weeklyLimitCount = await seedWeeklyLimits(prisma);
   const stanowiskoRoleCount = await seedStanowiskoRoles(prisma);
   const adminEmail = await seedFirstAdmin(prisma, adminPassword);
 
@@ -81,6 +84,7 @@ async function main(): Promise<void> {
   console.log(`Seeded AppConfig:    ${configCount} keys`);
   console.log(`Seeded TrailerType:  ${trailerTypeCount} entries`);
   console.log(`Seeded MonthlyLimit: ${monthlyLimitCount} rows`);
+  console.log(`Seeded WeeklyLimit:  ${weeklyLimitCount} rows`);
   console.log(`Seeded stanowiska:   ${stanowiskoRoleCount} role mappings`);
   console.log(`Seeded admin:        ${adminEmail} (password change forced on first login)`);
   console.log('');

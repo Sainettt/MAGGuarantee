@@ -2,14 +2,15 @@
 // production one-shot bootstrap (prisma/seed.prod.ts).
 //
 // This module holds ONLY the reference-data the two seeds have in common:
-// AppConfig keys, the TrailerType catalog, the MonthlyLimit placeholders and
-// the stanowisko → role mapping the Google SSO reads.
+// AppConfig keys, the TrailerType catalog, the MonthlyLimit and WeeklyLimit
+// placeholders and the stanowisko → role mapping the Google SSO reads.
 // It deliberately does NOT instantiate a PrismaClient — each seed entrypoint
 // owns its own client and passes it into these functions, so a single run never
 // opens two clients.
 //
-// All four functions are idempotent: they upsert on a unique business field
-// (config-key / trailer-type-name / (year, month) / stanowisko-code).
+// All five functions are idempotent: they upsert on a unique business field
+// (config-key / trailer-type-name / (year, month) / (isoYear, isoWeek) /
+// stanowisko-code).
 
 import { PrismaClient, Role } from '../src/generated';
 
@@ -116,6 +117,9 @@ export const SEED_TRAILER_TYPES: SeedTrailerType[] = [
 ];
 
 // ─── Monthly limits (placeholders) ──────────────────────
+// SUPERSEDED by the weekly limits below (2026-10-29); still seeded because the
+// api reads monthly_limits until stage 3. Removed in stage 5 (docs/17
+// «Доработка (2026-10-29)»).
 // Years 2026 and 2027 × 12 months = 24 rows. Admins edit through UI.
 // Keying on (year, month) composite unique → idempotent. Years are pinned
 // explicitly (rather than "current + next") so the seed produces the same
@@ -130,6 +134,53 @@ export const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
 // non-null value so the odd-Saturday credit shows up out of the box.
 export const MONTHLY_LIMIT_KM_PER_SATURDAY = '270';
 export const MONTHLY_LIMIT_YEARS = [2026, 2027];
+
+// ─── Weekly limits (placeholders) ───────────────────────
+// Every ISO week of ISO years 2026 and 2027 = 53 + 52 = 105 rows. Admins edit
+// through UI. Keyed on the (isoYear, isoWeek) composite unique → idempotent;
+// years pinned for the same reason as the monthly ones.
+//
+// The values reproduce what migration 20261029120000_weekly_limits unrolls from
+// the monthly placeholders above, so a freshly seeded DB and a DB migrated from
+// the monthly seed hold the SAME weeks:
+//   - kmPerDay 540, ratePerKm 0.5 on every week;
+//   - kmPerSaturday 270 if the week's Saturday is the 1st / 3rd / 5th Saturday
+//     of its month (the payouts of the retired "odd Saturday" rule), else 0;
+//   - NULL (not configured — pays the same as 0) when that Saturday falls in a
+//     calendar year outside WEEKLY_LIMIT_ISO_YEARS. Only 2027-W52 (Saturday
+//     01.01.2028): the migration finds no monthly row for January 2028 there.
+// Plain values with no business meaning, as for the monthly placeholders.
+
+export const WEEKLY_LIMIT_KM_PER_DAY = '540';
+export const WEEKLY_LIMIT_RATE_PER_KM = '0.5';
+export const WEEKLY_LIMIT_KM_PER_SATURDAY = '270';
+export const WEEKLY_LIMIT_ISO_YEARS = [2026, 2027];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ISO-week math on UTC epoch milliseconds only (Date.UTC / getUTC*): UTC has no
+// DST, so every day is exactly DAY_MS and the result never depends on the time
+// zone of the machine running the seed.
+
+/** Monday of ISO week 1 of `isoYear` (the week holding 4 January), UTC midnight, epoch ms. */
+function isoWeekOneMonday(isoYear: number): number {
+  const jan4 = Date.UTC(isoYear, 0, 4);
+  const isoDow = ((new Date(jan4).getUTCDay() + 6) % 7) + 1; // Mon=1 … Sun=7
+  return jan4 - (isoDow - 1) * DAY_MS;
+}
+
+/** 52 or 53. */
+function isoWeeksInYear(isoYear: number): number {
+  return Math.round((isoWeekOneMonday(isoYear + 1) - isoWeekOneMonday(isoYear)) / (7 * DAY_MS));
+}
+
+/** Seeded kmPerSaturday for the week starting on `mondayMs` (see the block comment above). */
+function seededKmPerSaturday(mondayMs: number): string | null {
+  const saturday = new Date(mondayMs + 5 * DAY_MS);
+  if (!WEEKLY_LIMIT_ISO_YEARS.includes(saturday.getUTCFullYear())) return null;
+  const ordinal = Math.floor((saturday.getUTCDate() - 1) / 7) + 1; // n-th Saturday of its month
+  return ordinal % 2 === 1 ? WEEKLY_LIMIT_KM_PER_SATURDAY : '0';
+}
 
 // ─── stanowisko → rola (Google SSO, docs/24 §4) ─────────
 
@@ -235,6 +286,32 @@ export async function seedMonthlyLimits(prisma: PrismaClient): Promise<number> {
           kmPerSaturday: MONTHLY_LIMIT_KM_PER_SATURDAY,
         },
         // Don't overwrite values on rerun — admin may have tuned them.
+        update: {},
+      });
+      count++;
+    }
+  }
+  return count;
+}
+
+export async function seedWeeklyLimits(prisma: PrismaClient): Promise<number> {
+  let count = 0;
+  for (const isoYear of WEEKLY_LIMIT_ISO_YEARS) {
+    const weekOneMonday = isoWeekOneMonday(isoYear);
+    const weeks = isoWeeksInYear(isoYear);
+    for (let isoWeek = 1; isoWeek <= weeks; isoWeek++) {
+      const mondayMs = weekOneMonday + (isoWeek - 1) * 7 * DAY_MS;
+      await prisma.weeklyLimit.upsert({
+        where: { isoYear_isoWeek: { isoYear, isoWeek } },
+        create: {
+          isoYear,
+          isoWeek,
+          kmPerDay: WEEKLY_LIMIT_KM_PER_DAY,
+          ratePerKm: WEEKLY_LIMIT_RATE_PER_KM,
+          kmPerSaturday: seededKmPerSaturday(mondayMs),
+        },
+        // Don't overwrite values on rerun — an admin may have tuned the week,
+        // or it was unrolled from monthly_limits by the migration.
         update: {},
       });
       count++;
