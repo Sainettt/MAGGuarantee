@@ -308,6 +308,8 @@ npm exec -w web -- shadcn@latest add button input label dialog \
 | `<ReklamacjaOutcome>` | — | Карточка исхода рекламации на carrier claim detail (`ReklamacjaOutcome.tsx`) |
 | `<UserPermissionsBlock>` | — (нет в legacy) | Композиция в `UserSheet`: «Dodatkowe» / «Odebrane» / «Uprawnienia efektywne» (docs/25 B6, 2026-10-27). См. «`UserSheet` — блок «Uprawnienia indywidualne»» |
 | `<CarrierDocumentsTab>` | — | Каталог документов фирмы + обзор флота (§5R); с 2026-10-27 общий для opiekun и перевозчика с `carrier_documents.read` (`components/documents/`). См. «Carrier «Dokumenty» tab» |
+| `<LimitsCalendar>` + `<WeekTile>` | лист `ensureLimitySheet` | Админ → limity: календарь года из плиток недель ISO (2026-10-29). См. §18.1–§18.2 |
+| `<WeekEditPanel>` | — | Админ → limity: панель правки одной недели и массовой правки выделения (на < 1280 px — в `<Sheet>`). См. §18.5–§18.6 |
 
 ## Скриншоты компонент-критичных мест
 
@@ -918,29 +920,11 @@ Audit-log хранится в Postgres (legacy `ensureAuditLogSheet` → Prisma 
 
 **Tokens:** `bg-card` row, hover — `--table-hover` (red-tinted, Phase 2). Expanded — `bg-input`.
 
-### `<LimitsRow>` (admin → limity, inline-edit)
+### ~~`<LimitsRow>` (admin → limity, inline-edit)~~ — SUPERSEDED by §18 (2026-10-29)
 
-> ⚠️ **EXTENDED by §16 (2026-09-20) — «Wyłączenie gwarancji».** Строка получила **два чекбокса** (вкл/выкл дневной и субботней гарантии), **четвёртое состояние ячейки** (`unsaved`) и **трёх-статусный визуальный контракт строки** (не сконфигурирован / выключен / активен). Раздел ниже остаётся базовой анатомией; всё, что касается включения-выключения, три состояния, массового применения и отображения выключенного месяца у перевозчика — читать в **§16, он авторитетный**.
+Лимиты задаются **по неделям ISO**, страница `/employee/limits` — календарь года из плиток недель + панель редактирования, а не таблица из 12 строк-месяцев. `<LimitsRow>` удаляется. Спека — **§18** (раскладка §18.1, плитка §18.2, три состояния §18.3, правка недели §18.5, массовая правка §18.6). Лимит по-прежнему глобальный — без измерения carrier/vehicle.
 
-Таблица KM-гарантий per (**год × месяц**) на `/employee/limits`: селектор года в шапке + 12 строк (по одной на месяц) с gap-fill на фронте — месяцы без строки в БД рендерятся пустыми, первое сохранение делает upsert. **Нет** измерения carrier/vehicle — лимит глобальный на месяц.
-
-Reference: legacy `ensureLimitySheet` (в легаси модель была per `carrier × vehicle × period`; в новом приложении упрощена до `год × месяц`).
-
-**Anatomy:** строка таблицы с **тремя** редактируемыми ячейками (`<EditableCell>`, `h-9 w-24 tabular-nums`, PL-запятая как десятичный разделитель):
-- **Km/dzień** (`kmPerDay`, `step=0.01`) — ячейка содержит чекбокс включения (§16.2),
-- **Km/sobota** (`kmPerSaturday`, `step=0.01`) — помесячный опт-ин субботней гарантии: `> 0` ⇒ ВКЛ для месяца, пусто/0 ⇒ ВЫКЛ (см. [01-overview.md](01-overview.md)); ячейка содержит свой чекбокс,
-- **rate** (`ratePerKm`, «Stawka € / km», `step=0.0001`) — чекбокса нет, ставка не выключается (§16.1).
-
-Порядок колонок: `Miesiąc | Km/dzień | Km/sobota | rate | Zaktualizowano`. Каждая ячейка — save-on-blur (`PUT /limits/:yearMonth`, partial body — шлётся только изменённое поле); при невалидном вводе значение откатывается к последнему валидному. **Пустой ввод больше не «no-op»** — см. §16.3.
-
-**Состояния cell:**
-- `idle` — обычный input.
-- `saving` — спиннер 12px справа от input, input disabled.
-- `success` (кратко после save) — **зелёная рамка инпута** `border-success focus:border-success`, fade-out.
-- `error` — `border-danger`, value reverted, toast.
-- `unsaved` (§16.3, NEW) — чекбокс включён, значение ещё не введено: `border-warning bg-warning/5` + под-строка «Nie zapisano — obowiązuje 0 km».
-
-**Прочие колонки** — read-only: `Zaktualizowano` (updatedAt). Месяцы года без данных показывают пустые ячейки-инпуты — отдельной «add-row» кнопки нет, сетка всегда 12 строк.
+Что переехало из этой строки в панель недели без изменений: save-on-blur с partial-телом, откат невалидного ввода, PL-запятая, `step` (`0.01` для км, `0.0001` для ставки) и состояния поля `idle` / `saving` (спиннер 12px) / `success` (зелёная рамка, fade-out) / `error` (`border-danger`, откат) / `unsaved` (§16.3). Колонка «Zaktualizowano» стала строкой статуса панели.
 
 ### `<UsersTable>` (admin → users CRUD)
 
@@ -1223,7 +1207,7 @@ Zmiana działa od następnej akcji użytkownika i trafia do audytu.
 - [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
 - [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов; авторизация автоматическая через `MaksimGateBlock` в основном потоке (ручного таба «Autoryzacja» нет — этап 5.1). Раскладку (факты → dopłata → decyzja), парные строки, секондари-«Historia» и Maksim-gate читать из §6.5.
 - [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
-- [ ] `<LimitsRow>` — три inline-ячейки (`kmPerDay` / `kmPerSaturday` / `ratePerKm`), save-on-blur, optimistic update, rollback + toast on error. ⚠️ **Дополнено §16** (два чекбокса, состояние `unsaved`, три состояния строки).
+- [ ] ⚠️ **SUPERSEDED §18 (2026-10-29):** `<LimitsRow>` удалён; страница лимитов — календарь недель + `<WeekEditPanel>`, checklist — §18.14.
 - [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
 - [ ] `lib/nav.config.ts` — pracownik видит ровно `[Dashboard, Wnioski]`, не больше.
 - [ ] **Ноль новых color/radius/shadow tokens** в Tailwind config относительно Phase 2.
@@ -1550,23 +1534,22 @@ Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<Em
 
 ### `<BreakdownTable>` — preview table on new-claim form
 
-> ⚠️ **EXTENDED by §16.5 (2026-09-20).** Месяц с выключенной гарантией (`kmPerDay === 0 && kmPerSaturday === 0`) рендерится по отдельному контракту: бейдж «Gwarancja wyłączona», приглушённая строка, `—` вместо ставки-призрака; смешанный период получает `<GuaranteeGapNotice>` **над** таблицей; период целиком без гарантии заменяет таблицу на `<EmptyState>`. **§16.5 авторитетен** для всего, что касается нулевых месяцев. **2026-09-24:** смешанный период считается по tablicy km — новый текст ноты (§16.5.3), staff-колонки «Km wg weryfikatora» / «Wpisane dni» (§16.5.5).
+> ⚠️ **REWORKED by §18.7 (2026-10-29) — по неделям.** Строка разбивки — **неделя ISO** («Tydz. 23 · 03.06–07.06», даты обрезаны по периоду wniosku), суббота — своя колонка «Sob.», узкий вид — свёрнутые строки вместо карточек, пороги 36rem / staff 46rem. Полная спека строк, колонок и раскладок — **§18.7**; ниже — только сводка. **§16.5 по-прежнему авторитетен** для выключенной недели (бейдж, приглушение, `—` вместо ставки-призрака), смешанного периода (`<GuaranteeGapNotice>` **над** таблицей), пустого состояния всего периода и staff-колонок tablicy km.
 
-Compact read-only table fed by server preview response. Columns:
+Compact read-only table fed by server preview response. Columns (§18.7.1):
 
 | Column | Header (PL) | Header (EN) | Format | Tailwind |
 |---|---|---|---|---|
-| `yearMonth` | "Miesiąc" | "Month" | `2026-04` | `text-left font-mono` |
-| `workingDays` | "Dni rob." | "Work days" | integer | `text-right tabular-nums` |
+| неделя | "Tydzień" | "Week" | `Tydz. 23 · 03.06–07.06` | `text-left` |
+| `workingDays` | "Dni rob." | "Work days" | integer, только пн–пт | `text-right tabular-nums` |
 | `kmPerDay` | "Km/dz." | "Km/day" | integer | `text-right tabular-nums` |
-| `ratePerKm` | "€/km" | "€/km" | 4 decimals | `text-right tabular-nums` |
-| `kmInMonth` | "Km/mc" | "Km/mo" | integer with thousand-sep | `text-right tabular-nums font-semibold` |
+| суббота | "Sob." | "Sat." | `300` / `—` / `0` (§18.7.1) | `text-right tabular-nums` |
+| `ratePerKm` | "€/km" | "€/km" | 2–4 decimals | `text-right tabular-nums` |
+| `kmInWeek` | "Km/tydz." | "Km/wk" | integer with thousand-sep = `round(workingDays × kmPerDay) + км субботы` | `text-right tabular-nums font-semibold` |
 
-Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/km`→`€/km`, `Km w mc`→`Km/mc`, total `…(km gwarantowane)`→`…(km gwarant.)`) so the 5-column table never wraps headers even when squeezed into the narrow employee claim modal. i18n keys unchanged: `carrier.breakdown.*` in `messages/pl.json` + `en.json`.
+Headers stay **abbreviated** (Phase 3.1 rule: `Km/dz.`, `€/km`, total `…(km gwarant.)`) so the table never wraps headers in the narrow employee claim modal.
 
-> **Семантика колонок сместилась (субботняя гарантия).** `workingDays` — **теперь только будни** (пн–пт); `kmInMonth` — **гранд-тотал** = `round(workingDays × kmPerDay) + kmFromSaturdays`. Полное число дней месяца = `workingDays + saturdaysCounted`.
-
-**Субботняя суб-строка (odd-Saturday guarantee).** Под строкой месяца, у которого `saturdaysCounted > 0`, рендерится дополнительная строка **«SOBOTY {n} × {km} = {total} km»** (i18n `carrier.breakdown.saturdays` = «Soboty» + `saturdaysDetail` = `{count} × {perSaturday} = {total} km`) — в **обеих** раскладках (5-колоночная таблица И stacked-cards). При `saturdaysCounted = 0` строка **не** показывается: месяц без субботней гарантии выглядит байт-в-байт как раньше. Подсказка `carrier.breakdown.excludedDaysHint` переформулирована — «Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. …» (воскресенья исключены всегда; субботы — если не покрыты субботней гарантией). Зачётная суббота, попавшая на EU-ban/праздник, уходит в список excluded-дней (не оплачивается, не считается днём).
+Подсказка `carrier.breakdown.excludedDaysHint` — «Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. …» — остаётся. Зачётная суббота, попавшая на EU-ban / праздник, уходит в список excluded-дней, а в колонке «Sob.» стоит `0`.
 
 > ⚠️ **УДАЛЕНО (§0‴, 2026-07-08):** граничный хинт про время на форме претензии (под бывшими полями Godzina od / Godzina do, включая субботний вариант) — **убран**: форма `/carrier/claims/new` больше не содержит полей ввода времени (часы деривируются из выезда и показываются read-only «Godziny (z wyjazdu)»). Подсказка `excludedDaysHint` в таблице разбивки (выше) — это **другое**, остаётся.
 
@@ -1574,21 +1557,22 @@ Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/k
 
 `<BreakdownTable>` is reused at **two very different widths**: the wide carrier new-claim preview panel, and the narrow employee `<ClaimDetailModal>` breakdown section. It must be non-breaking in both. Pattern: **render both layouts, toggle by the component's OWN width via a container query.**
 
-> **Why container queries, not `sm:` (corrects the earlier viewport-breakpoint spec).** `sm:hidden` / `hidden sm:block` are **viewport** breakpoints. The breakdown's host width has nothing to do with the viewport — it lives inside a modal section column. On any desktop viewport (`≥sm`) the viewport-toggle always picked the **table** variant, which then overflowed the narrow host column; the card variant only ever appeared on phone-width viewports. The fix is to toggle on the **container** width. The project is **Tailwind CSS v4** (`tailwindcss@^4`, `@tailwindcss/postcss@^4`, no `tailwind.config` — CSS-based config) which has **container queries in core — no plugin**. The root carries `@container`; the card/table toggle uses the arbitrary container variants `@max-[34rem]:…` / `@min-[34rem]:…`.
+> **Why container queries, not `sm:` (corrects the earlier viewport-breakpoint spec).** `sm:hidden` / `hidden sm:block` are **viewport** breakpoints. The breakdown's host width has nothing to do with the viewport — it lives inside a modal section column. On any desktop viewport (`≥sm`) the viewport-toggle always picked the **table** variant, which then overflowed the narrow host column; the narrow variant only ever appeared on phone-width viewports. The fix is to toggle on the **container** width. The project is **Tailwind CSS v4** (`tailwindcss@^4`, `@tailwindcss/postcss@^4`, no `tailwind.config` — CSS-based config) which has **container queries in core — no plugin**. The root carries `@container`; the toggle uses the arbitrary container variants `@max-[36rem]:…` / `@min-[36rem]:…`.
 
-**Threshold: `34rem` (544px).** Below `34rem` the host is too narrow for the 5-column table to stay readable even at `text-xs`/`px-2` (the abbreviated headers + 4-decimal rate + thousand-separated km total need ~30–34rem). So: container **`< 34rem` → stacked cards**, container **`≥ 34rem` → 5-column table**. The narrow `<ClaimDetailModal>` breakdown section (now full-width — see §6.20) is wide enough on `lg+` to land in the table layout; on small modals / phones it falls to cards.
+**Threshold: `36rem` (576px); staff variant with km-board columns — `46rem` (736px)** (2026-10-29: were 34rem / 40rem; the weekly table has a sixth column «Sob.», the staff one eight columns). Below the threshold the host is too narrow for the table to stay readable even at `text-xs`/`px-2`. The `<ClaimDetailModal>` breakdown section (full-width — see §6.20) lands in the table layout on `lg+`; on small modals / phones it falls to the narrow layout.
 
 | Container width | Layout | Tailwind |
 |---|---|---|
-| **`< 34rem`** (cramped modal column, phone) | **Stacked card per month.** Each month = `rounded-md border border-border p-3`; the 4 metrics in a `grid grid-cols-2 gap-x-4 gap-y-2` label/value `<dl>` (`dt` = `text-text-sub`, `dd` = `tabular-nums`, `Km/mc` value `font-semibold`). Footer total = a single `bg-bg` row below the list. **No horizontal scroll, ever.** | root `@container`; card wrapper `@max-[34rem]:block @min-[34rem]:hidden p-3` |
-| **`≥ 34rem`** (wide preview, roomy modal) | **5-column `<table>`**, tightened: `text-xs`, cells `px-2 py-2 h-10`, headers `whitespace-nowrap` (never wrap), `tracking-wide`. Footer `colSpan={4}` + value cell, unchanged structure. | table wrapper `@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto` |
+| **`< 36rem`** (staff `< 46rem`) — cramped modal column, phone | **Collapsed row per week** (§18.7.3): one line «label + mode badge + Km/tydz.», tap expands a `<dl>` with the details. Footer total = a single `bg-bg` row below the list. **No horizontal scroll, ever.** | root `@container`; wrapper `@max-[36rem]:block @min-[36rem]:hidden` |
+| **`≥ 36rem`** (staff `≥ 46rem`) — wide preview, roomy modal | **6-column `<table>`** (staff 8), tightened: `text-xs`, cells `px-2 py-2 h-10`, headers `whitespace-nowrap` (never wrap), `tracking-wide`. Footer label `colSpan={5}` + value cell. | table wrapper `@max-[36rem]:hidden @min-[36rem]:block overflow-x-auto` |
 
 - **Root** is the `@container` context: `@container bg-card rounded-lg border border-border overflow-hidden`.
-- Both views share `<ExcludedDays>` (the holiday/EU-ban disclosure) and `<MonthToggle>` (chevron + `yearMonth` + count) so behavior is identical across widths — the only difference is the metric layout (`<td>` cells vs. `<dl>` rows). Excluded-days expand/collapse + footer-total semantics are unchanged.
-- Card view re-uses the same abbreviated header strings as `dt` labels — no new i18n keys needed.
+- Classes are **literal** (Tailwind v4 scans source; `@min-[${bp}]` interpolation generates no CSS): two full class sets, picked via `cn(boardMode ? '…46rem…' : '…36rem…')`.
+- Both views share `<ExcludedDays>` (the holiday/EU-ban disclosure) and `<WeekToggle>` (chevron + week label + count; formerly `<MonthToggle>`) so behavior is identical across widths — the only difference is the metric layout (`<td>` cells vs. `<dl>` rows).
+- The narrow view re-uses the abbreviated header strings as `dt` labels.
 - **Do not** reintroduce `sm:hidden`/`hidden sm:block` here — that is the bug this spec fixes.
 
-Empty / loading state — see `<LivePreviewPanel>`. The card view renders the same `t('empty')` message centered when `rows.length === 0`.
+Empty / loading state — see `<LivePreviewPanel>`. The narrow view renders the same `t('empty')` message centered when `rows.length === 0`.
 
 ### `<LivePreviewPanel>` — wraps BreakdownTable + stat cards
 
@@ -3294,7 +3278,7 @@ sections.push({
 });
 ```
 
-The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsive behavior) into the 5-col table on `lg`-wide modals and into stacked cards on narrow/phone widths. **This is the canonical pattern for any embedded table/chart row** in an `EntityDetailModal` (future: GPS log table, payout history chart, etc.).
+The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsive behavior) into the weekly table on `lg`-wide modals and into collapsed week rows on narrow/phone widths (§18.7). **This is the canonical pattern for any embedded table/chart row** in an `EntityDetailModal` (future: GPS log table, payout history chart, etc.).
 
 ### 6.12 Anti-patterns to avoid
 
@@ -4768,7 +4752,7 @@ This is intentionally the **same muted surface** as the computed-field pattern s
 
 ### 6.5.4 Dopłata — locked / computed field, live, ABOVE the decision
 
-> ⚠️ **EXTENDED by §16.6 (2026-09-20).** В header-строке этого блока, справа от `<RecalcBadge>`, добавляется вторичная кнопка **«Przelicz wg aktualnych limitów»** (`variant="outline"`, роли `admin` / `weryfikator`) + статичная строка `recalc.snapshotNote`. Кнопка **не** уезжает в футер — футер принадлежит решению. Диалог сравнения «было → станет» — §16.6.
+> ⚠️ **EXTENDED by §16.6 (2026-09-20).** В header-строке этого блока, справа от `<RecalcBadge>`, добавляется вторичная кнопка **«Przelicz wg aktualnych limitów»** (`variant="outline"`, роли `admin` / `weryfikator`) + статичная строка `recalc.snapshotNote`. Кнопка **не** уезжает в футер — футер принадлежит решению. Диалог сравнения «было → станет» — §16.6; **2026-10-29:** с изменёнными неделями — §18.8.
 
 > ⚠️ **EXTENDED by §16.5.10 (2026-09-24).** Directly under the dopłata field (above the «wyliczana automatycznie» description) a two-line **niedojazd** readout: a sentence («Pojazd przejechał o X km mniej, niż gwarantowano.») + formula («Niedojazd: G km gwarant. − D km … = X km × R €/km»). It uses the same data source as the field. The spec is in §16.5.10.
 
@@ -4776,7 +4760,7 @@ A single full-width block between the fact pairs and the decyzja block. This is 
 
 - **Live recalculation, decision-independent.** It recomputes via the live `/claims/preview` dopłata whenever any of the 6 facts changes (debounced 300ms — keep the Phase 4 debounce), **regardless of which `targetStatus` is selected**. The verifier sees the financial consequence of their corrections *before* committing to a decision. This is the reason it sits above decyzja, not inside the ZAAKCEPTOWANO branch.
 - **`<RecalcBadge>`** to the right of the dopłata value: `<Badge variant="outline" className="animate-pulse">Przeliczam…</Badge>` during debounce → `<Badge variant="outline" className="text-success">Aktualne</Badge>` when settled (the legacy «Przelicz» button + «Wynik przeliczenia» panel from `modal-status-p2.png` collapse into this live badge + value — no manual "Przelicz" click in the new design).
-- The breakdown detail (period split, weekend-skip count, korekta serwisowa line) from `modal-status-p2.png` renders as a **collapsible `<BreakdownTable>`** (§"BreakdownTable") under the dopłata number — `view` shows it expanded read-only; `edit` keeps it but live-updates. Use the container-query layout already specified (`< 34rem` → stacked cards, `≥ 34rem` → 5-col table); inside a `max-w-4xl` Dialog body it lands in the table layout on `lg+`.
+- The breakdown detail (period split, weekend-skip count, korekta serwisowa line) from `modal-status-p2.png` renders as a **collapsible `<BreakdownTable>`** (§"BreakdownTable") under the dopłata number — `view` shows it expanded read-only; `edit` keeps it but live-updates. Use the container-query layout already specified (staff variant: `< 46rem` → collapsed week rows, `≥ 46rem` → weekly table; without km-board columns 36rem — §18.7); inside a `max-w-4xl` Dialog body it lands in the table layout on `lg+`.
 - **`HoursReadout`** (§A) renders `live` under the `hoursAdjusted` input (fact #6) AND once more in this dopłata block's breakdown — same component, same copy, do not fork.
 
 ### 6.5.5 Decyzja — at the very bottom
@@ -6369,7 +6353,7 @@ Every built screen maps to exactly one **archetype**. The polish recipe is defin
 
 | Archetype | Shape | Screens (route → archetype) |
 |---|---|---|
-| **A — Data-table page** | filter row + `<DataTable>` (one or `<Tabs>`-of-tables) | `/carrier/claims`, `/employee/claims`, `/employee/carriers`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/users`, `/employee/limits`, `/employee/audit`, `/employee/delegations`, `/eksport/delegations`, `/carrier/fleet` (unified, KPI strip + in-page `<Tabs>`-of-tables — see Phase 3 carrier fleet panel), `/carrier/delegations`, `/planista`, `/dyspozytor`, `/eksport` |
+| **A — Data-table page** | filter row + `<DataTable>` (one or `<Tabs>`-of-tables) | `/carrier/claims`, `/employee/claims`, `/employee/carriers`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/users`, `/employee/audit`, `/employee/delegations`, `/eksport/delegations`, `/carrier/fleet` (unified, KPI strip + in-page `<Tabs>`-of-tables — see Phase 3 carrier fleet panel), `/carrier/delegations`, `/planista`, `/dyspozytor`, `/eksport` |
 | **B — Dashboard (KPI + panels/charts)** | `<KpiCard>` row + side/section panels, some Recharts | `/carrier` (carrier dashboard), `/employee/dashboard`, `/employee` (entry), `/dyspozytor` KPI strip, `/employee/diagnostics` |
 | **C — Detail modal / sheet / drill page** | `Dialog`/`Sheet`/grouped-`<dl>` detail surface | `ClaimModal` (claim verify/detail), `EntityDetailModal` (vehicle/driver/trailer/carrier), `/carrier/claims/[nrZgl]`, `/employee/opieka/carriers/[login]`, delegation detail modal, `VehicleMonthKmModal` |
 | **D — Form page / wizard** | RHF + Zod form (single or multi-step) | `/carrier/claims/new`, `/carrier/delegations/new`, carrier-onboarding wizard, all edit `<Sheet>` forms |
@@ -6377,6 +6361,8 @@ Every built screen maps to exactly one **archetype**. The polish recipe is defin
 
 `/employee/opieka` (the opiekun carrier card-grid) is its **own** archetype, already fully specced in
 §5.2.7 / §5.2.8 — reuse those, do not re-derive.
+
+`/employee/limits` (2026-10-29: week calendar + edit panel, no longer a table) is also its **own** archetype — loading / error states in §18.1, feedback in §18.5.2.
 
 ### 8.1 Loading skeletons — per-archetype recipe
 
@@ -6426,7 +6412,7 @@ of a completed action the user already initiated**, never for state the user mus
 | Use a toast for | Treatment |
 |---|---|
 | **Mutation success** (create / update / delete / status-stamp succeeded and the surface closed or stayed) | `toast.success(t('…toast.saved'))`. Standard messages: create → «Dodano», update → «Zapisano zmiany», delete → «Usunięto», status-stamp → the action-specific string already defined (e.g. «Oznaczono: W trasie»). Keep them **short** (1 line). |
-| **Mutation failure** that is **not** field-level (network, 500, 403, optimistic rollback) | `toast.error(t('…toast.saveFailed'))` (+ rollback if optimistic). For optimistic km/limits cells this is the **only** failure signal — keep it. |
+| **Mutation failure** that is **not** field-level (network, 500, 403, optimistic rollback) | `toast.error(t('…toast.saveFailed'))` (+ rollback if optimistic). For optimistic km cells this is the **only** failure signal — keep it. Limits (§18.5.2) keep the error toast and add a persistent panel status + `border-danger` on the tile; **single-week success is not toasted** there. |
 | **Fire-and-forget side effects** with no visible result | clipboard copy **failure** (`toast.error`), background refetch failure. Clipboard **success** stays **inline** (checkmark swap) per §3.4 — do **not** double-toast. |
 
 **Do NOT toast (use inline instead):**
@@ -6463,7 +6449,8 @@ Maps to native `<form onSubmit>` (RHF). **Exceptions where Enter must NOT submit
   last step's primary button.
 - **Inputs with an open suggestion popover** (`<MultiSelect>`, combobox, `<Command>`) — Enter selects the active
   option, does not submit the parent form (Radix/cmdk default — verify it doesn't bubble to submit).
-- **Inline-edit cells** (limits, km) — Enter commits the cell (blur-save), does not submit a page-level form.
+- **Inline-edit cells** (km) — Enter commits the cell (blur-save), does not submit a page-level form.
+- **Limits week panel** (§18.5.3) — Enter commits the field and moves to the **same field of the next week**; Shift+Enter — previous week.
 
 **Other keys (inherited, verify don't break):** `<Tabs>` arrow-key navigation between triggers; `<CodeBox>`
 2FA auto-advance + Backspace-to-prev; `<Command>` arrow+type-ahead. No new global hotkeys introduced in Phase 8.
@@ -6538,7 +6525,7 @@ Columns: **Sk** = §8.1 skeleton applied · **Em** = §8.2 empty state(s) applie
 | `/employee/{vehicles,drivers,trailers}` | A + C | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
 | `/employee/trailer-types` | A | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
 | `/employee/users` | A | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
-| `/employee/limits` | A (inline-edit) | yes | ✓ | data / filtered | optimistic err | Enter commits cell (no page submit) | ✓ | ✓ |
+| `/employee/limits` | own (week calendar §18) | yes | §18.1 | — (always 52/53 weeks) | err only; bulk success | §18.5.3 (grid arrows, Enter → next week) | ✓ | ✓ |
 | `/employee/audit` (Phase 8 new) | A | no | ✓ | data / filtered | — | Esc (detail) | ★key | ✓ |
 | `/employee/diagnostics` | B | no | ✓ | per-panel | err on action | — | ✓ | ✓ |
 | `/employee/delegations` | A | maybe | ✓ | data / filtered | save/err | Esc | ✓ | ✓ |
@@ -7985,6 +7972,8 @@ KPI-кафели показывали числа, но были тупиком: 
 > **Scope.** Админский лист `/employee/limits` получает возможность **выключать гарантию** (месяц целиком и/или субботы), массово применять значения к диапазону месяцев; перевозчик и сотрудник получают честное объяснение, почему в выключенном месяце ноль. Этот раздел авторитетен для всего, что касается «включено / выключено / не настроено». Он **расширяет** §`<LimitsRow>` (Phase 4) и §`<BreakdownTable>` (Phase 3) и **добавляет** одну кнопку в §6.5.4.
 >
 > **Ноль новых токенов, ноль новых примитивов.** Всё собирается из `Checkbox`, `Input`, `Select`, `MultiSelect`, `Badge`, `Dialog` / `FormDialog`, `EmptyState`, `Button` и уже существующих цветовых токенов.
+>
+> ⚠️ **2026-10-29 — лимиты по неделям ISO, §18 авторитетен для раскладки.** Единица лимита — неделя, а не месяц: везде в §16, где о лимите или строке разбивки сказано «месяц / miesiąc», читать «неделя / tydzień». **Заменены §18:** раскладка таблицы и строки (§16.1 — оформление, §16.2 целиком), `<BulkLimitsDialog>` (§16.4 целиком), месячные строки и карточки разбивки (§16.5.2, §16.5.5 — раскладка и пороги), содержимое `<RecalcLimitsDialog>` (§16.6), `limits.*` в §16.7, сводка §16.8, checklist §16.9. **В силе:** правила трёх состояний (§16.1), механика галок (§16.3, теперь в панели недели), ставка-призрак, смешанный период, пустое состояние, гейт и niedojazd (§16.5.1, §16.5.3–§16.5.6, §16.5.9, §16.5.10), размещение кнопки пересчёта (§16.6). Тексты с «miesiąc» в §16.5.7, §16.5.10 и §16.7 (`carrier.breakdown`) переписаны на «tydzień» на месте.
 
 ### §16.1 — Три состояния лимита — визуальный контракт (главное решение)
 
@@ -7992,153 +7981,75 @@ KPI-кафели показывали числа, но были тупиком: 
 
 | # | БД | Что реально применится | Название в UI (PL) |
 |---|---|---|---|
-| **A** | строки нет / `NULL` | **fallback 540 км/день, 0,50 €/км** — месяц молча платит по максимуму | «domyślne» |
+| **A** | строки нет / `NULL` | **fallback 540 км/день, 0,50 €/км** (пополево) — неделя молча платит по максимуму | «domyślne» |
 | **B** | `0` | 0 км — гарантии нет | «wyłączona» |
 | **C** | `> 0` | заданное значение | — (нормальное состояние) |
 
-**Правило (locked): состояние A никогда не выражается пустотой.** Пустая ячейка не имеет права быть единственным сигналом «действует 540» — это ровно та ловушка, из-за которой забытый месяц выплачивает максимум. Поэтому состояние A всегда несёт **текст**, а не отсутствие текста.
+**Правило (locked): состояние A никогда не выражается пустотой.** Пустое поле не имеет права быть единственным сигналом «действует 540» — это ровно та ловушка, из-за которой забытая неделя выплачивает максимум. Поэтому состояние A всегда несёт **текст**, а не отсутствие текста.
 
-**Треугольник различий — по трём осям сразу** (цвет, текст, поверхность), чтобы 12 строк читались одним взглядом:
+**Как три состояния выглядят — §18.3** (по каждому значению недели: `540 dom.` янтарём / `wył.` / число; приглушённая плитка `bg-input/40` — только неделя, которая не платит ничего). Прежняя таблица «ось × состояние» для строки месяца (под-строка в ячейке «Miesiąc», приглушённая `<tr>`) заменена 2026-10-29.
 
-| Ось | A. Nieskonfigurowany | B. Wyłączona | C. Aktywna |
-|---|---|---|---|
-| Поверхность `<tr>` | `bg-card` (обычная) | **`bg-input/40`** — единственная приглушённая строка в таблице | `bg-card` |
-| Ячейка «Miesiąc» | название + **под-строка** `text-[11px] text-warning-dark dark:text-warning`: «domyślne: 540 km/dz. · 0,50 €/km» | название `text-text-sub` + под-строка `text-[11px] text-text-sub`: «gwarancja wyłączona (0 km)» | только название `font-semibold text-text`, под-строки нет |
-| Инпут `Km/dzień` | пустой, `placeholder="540 (domyślnie)"` (`placeholder:text-text-sub`) | `readOnly`, значение `0`, поверхность `bg-input/40 text-text-sub cursor-not-allowed` | обычный `bg-input text-text` |
-| Чекбокс в ячейке | **отмечен** (гарантия действует — по умолчанию) | снят | отмечен |
+**Почему в состоянии A чекбокс отмечен.** Чекбокс отвечает на вопрос «действует ли гарантия в этой неделе», а не «есть ли строка в БД». При `NULL` гарантия действует (по fallback), поэтому галка стоит. Инвариант, который нельзя ломать: **снятая галка ⟺ значение `0` ⟺ ноль километров.** Одно значение — одно прочтение.
 
-**Почему в состоянии A чекбокс отмечен.** Чекбокс отвечает на вопрос «действует ли гарантия в этом месяце», а не «есть ли строка в БД». При `NULL` гарантия действует (по fallback), поэтому галка стоит. Инвариант, который нельзя ломать: **снятая галка ⟺ значение `0` ⟺ ноль километров.** Одно значение — одно прочтение.
+**Цвет — только у состояния A, только на значении.** Это единственное цветное пятно, потому что A — единственное опасное состояние («ты этого не настраивал, а деньги идут по максимуму»). Заливки `bg-warning/10` на всю плитку **нет**: год без конфигурации превратился бы в янтарную стену, и сигнал перестал бы быть сигналом. Приглушённая заливка зарезервирована за B — «выключено» должно читаться как выключенный свет, а не как ошибка.
 
-**Цвет — только у состояния A, только в под-строке.** Это единственное цветное пятно в таблице, потому что A — единственное опасное состояние («ты этого не настраивал, а деньги идут по максимуму»). Заливки `bg-warning/10` на всю строку **нет**: год без конфигурации превратился бы в янтарную стену, и сигнал перестал бы быть сигналом. Приглушённая заливка зарезервирована за B — «выключено» должно читаться как выключенный свет, а не как ошибка.
+**Зачёркивание запрещено** во всём UI лимитов: `line-through` читается как «удалено/аннулировано» (и так же озвучивается скринридерами `<del>`-семантикой), тогда как выключенная неделя — это действующая конфигурация, а сохранённая ставка вообще ценность, которую мы бережём.
 
-**Зачёркивание запрещено** во всей таблице лимитов: `line-through` читается как «удалено/аннулировано» (и так же озвучивается скринридерами `<del>`-семантикой), тогда как выключенный месяц — это действующая конфигурация, а сохранённая ставка вообще ценность, которую мы бережём.
+**Страничная сводка (одна на страницу).** Над календарём, когда `count > 0` недель в состоянии A, — тихая нота в рецепте §7.7.1b / `<LockNotice>` (нейтральная, `role="note"`, `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub`), иконка `<Info size={14} className="mt-0.5 shrink-0" />`, копия `limits.defaultsNotice` + кнопка «Zaznacz te tygodnie» (§18.3). Именно здесь живёт объяснение fallback-а целиком — пометки в плитках его только маркируют.
 
-**Страничная сводка (одна, не двенадцать).** Над таблицей, когда `count > 0` месяцев в состоянии A, — тихая нота в рецепте §7.7.1b / `<LockNotice>` (нейтральная, `role="note"`, `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub`), иконка `<Info size={14} className="mt-0.5 shrink-0" />`, копия `limits.defaultsNotice`. Именно здесь живёт объяснение fallback-а целиком — под-строки в рядах его только маркируют.
+**Обратной дороги в A нет.** UI **не** предоставляет способа вернуть неделю в `NULL`: как только значение записано, оно сконфигурировано. Состояние A — только стартовое, никогда не пункт назначения. «Очистить неделю» не добавлять.
 
-**Обратной дороги в A нет.** UI **не** предоставляет способа вернуть месяц в `NULL`: как только строка записана, месяц сконфигурирован. Состояние A — только стартовое, никогда не пункт назначения. «Очистить месяц» в меню строки не добавлять.
+**У `kmPerSaturday` состояний только два.** `NULL` и `0` поведенчески идентичны (гарантии в субботу нет), поэтому суббота — чистый вкл/выкл (`—` в плитке). Пометки «domyślne» у субботы **нет** никогда — fallback субботы равен нулю, скрытого риска нет.
 
-**У `kmPerSaturday` состояний только два.** `NULL` и `0` поведенчески идентичны (гарантии по субботам нет), поэтому суббота рендерится как чистый вкл/выкл: снятая галка + `readOnly` `0` + `bg-input/40` в своей ячейке. Под-строки «domyślne» у субботы **нет** никогда — fallback субботы равен нулю, скрытого риска нет.
+**Ставка (`ratePerKm`) не выключается.** У неё нет чекбокса и нет состояния «выключена»: ставка — цена километра, а не количество. В выключенной неделе она **сохраняется и остаётся редактируемой** (с нативным `title` = `limits.disabledRateHint`). Это прямое следствие бизнес-требования «ставку не вводить заново».
 
-**Ставка (`ratePerKm`) не выключается.** У неё нет чекбокса и нет состояния «выключена»: ставка — цена километра, а не количество. В выключенном месяце она **сохраняется и остаётся редактируемой** (значение рендерится `text-text-sub`, поверхность обычная `bg-input`), с нативным `title` = `limits.disabledRateHint`. Это прямое следствие бизнес-требования «ставку не вводить заново».
+### ~~§16.2 — Размещение чекбоксов: внутри ячеек, а не в колонке слева~~ — SUPERSEDED by §18.5.1 (2026-10-29)
 
-### §16.2 — Размещение чекбоксов: внутри ячеек, а не в колонке слева
+Таблицы с ячейками больше нет: галки живут в панели недели рядом со своим инпутом, с видимой подписью «Włączona» (конфликта с выбором строки, ради которого галку прятали в ячейку, в панели нет; выделение недель — кликом по плиткам, §18.6). Остаётся в силе:
 
-**Решение (locked): чекбокс живёт внутри той ячейки, которой управляет.** Ячейка `Km/dzień` = `[✓] [ 540 ]`, ячейка `Km/sobota` = `[ ] [ 0 ]`. Ни отдельной колонки слева от «Miesiąc», ни чекбокса в шапке колонки.
-
-| Отвергнутый вариант | Почему нет |
-|---|---|
-| Чекбокс первой колонкой / слева от названия месяца | Чекбокс в первой колонке таблицы — это **универсальная конвенция row-selection**. А у нас на этой же странице появляется массовое применение, т.е. пользователь вправе ждать, что галка выбирает строку для bulk-операции. Коллизия смыслов на ровном месте. |
-| Чекбокс субботы в шапке колонки `Km/sobota` | Чекбокс в `<th>` — тоже конвенция, и тоже чужая: «select all». Плюс он физически не может отличаться по месяцам, а суббота настраивается помесячно. |
-
-**Что даёт выбранный вариант:** (1) чекбокс и число, которым он управляет, — одно визуальное целое; (2) два чекбокса стоят рядом в соседних ячейках, на одном уровне, **никакой вложенности** — это и есть визуальное доказательство их независимости; (3) первая колонка остаётся свободной под будущий row-select, если он когда-нибудь понадобится.
-
-**Анатомия ячейки:**
-
-| Элемент | Tailwind |
-|---|---|
-| Обёртка ячейки | `flex items-center gap-2` |
-| Хит-область чекбокса | `<label className="inline-flex h-9 w-9 shrink-0 items-center justify-center cursor-pointer rounded-md hover:bg-input">` — сам `<Checkbox className="h-4 w-4">` внутри |
-| Инпут | `h-9 w-24 tabular-nums` (был `w-28` — 4 единицы отданы чекбоксу; колонка по ширине не меняется) |
-| Высота строки | `h-12` сохраняется; под-строки состояний ложатся в тот же ряд как второй `text-[11px]`-лайн в ячейке «Miesiąc», строка растёт до `h-14` только при наличии под-строки |
-
-**Touch-target.** 36×36 хит-области достаточно: WCAG 2.2 **2.5.8 Target Size (Minimum) — AA = 24×24 CSS px**; 44×44 это 2.5.5 (AAA). В плотной админ-таблице 36×36 — сознательный компромисс, зафиксированный здесь, чтобы web-agent не «чинил» его до 44 и не ломал ритм строки.
-
-**Доступное имя** у каждого чекбокса обязано содержать месяц, потому что видимая подпись — это заголовок колонки, а скринридер идёт по ячейкам: `aria-label={t('toggleDay', { month: 'Styczeń 2026' })}`. Для субботы — `toggleSaturday`.
-
-**Независимость проговаривается словами, а не только вёрсткой.** Под таблицей (или в `subtitle` шапки) — одна строка `text-xs text-text-sub`: `limits.independenceHint` («Gwarancja dzienna i sobotnia są niezależne — miesiąc może mieć włączone tylko soboty.»). Снятие месячной галки **никогда** не трогает субботнюю (и наоборот): ни автоматически, ни с подтверждением.
+- **Хит-область галки ≥ 36 px** (WCAG 2.2 2.5.8 AA = 24×24; 44×44 — это 2.5.5 AAA) — сознательный компромисс плотного админ-UI, не «чинить» до 44.
+- **Доступное имя галки содержит неделю**: `aria-label={t('toggleDay', { week: 'Tydzień 23' })}`, для субботы — `toggleSaturday`.
+- **Независимость проговаривается словами**: под календарём `limits.independenceHint` (§18.9). Снятие дневной галки **никогда** не трогает субботнюю (и наоборот): ни автоматически, ни с подтверждением.
 
 ### §16.3 — Поведение при переключении: снятие пишет, установка — нет
 
-Механика утверждена и переносится в UI буквально:
+Механика утверждена и переносится в UI буквально. **2026-10-29:** действует для полей панели одной недели (§18.5.1); «поле» — инпут панели, «неделя» — её плитка в календаре; запись — по ключу недели `YYYY-Www`.
 
 | Действие | Что происходит с БД | Что видит пользователь |
 |---|---|---|
-| **Снять галку** | немедленный `PUT { kmPerDay: 0 }` (соотв. `{ kmPerSaturday: 0 }`) | ячейка `saving` → `success`-вспышка → строка оседает в состояние **B** |
-| **Поставить галку** | **ничего не пишется** | инпут разблокируется, получает фокус, ячейка переходит в состояние **`unsaved`** |
-| **Ввести значение и уйти с поля** | `PUT { kmPerDay: <value> }` | обычный `saving` → `success`, строка становится **C** |
-| **Уйти с пустого поля / Esc** | ничего | галка **сама возвращается в снятое положение**, `unsaved` гаснет, строка остаётся **B** |
+| **Снять галку** | немедленная запись `{ kmPerDay: 0 }` (соотв. `{ kmPerSaturday: 0 }`) | поле `saving` → `success`-вспышка → неделя оседает в состояние **B** |
+| **Поставить галку** | **ничего не пишется** | инпут разблокируется, получает фокус, поле переходит в состояние **`unsaved`** |
+| **Ввести значение и уйти с поля** | запись `{ kmPerDay: <value> }` | обычный `saving` → `success`, неделя становится **C** |
+| **Уйти с пустого поля / Esc** | ничего | галка **сама возвращается в снятое положение**, `unsaved` гаснет, неделя остаётся **B** |
 
-**Почему установка галки не пишет `NULL`:** запись `NULL` вернула бы месяц в состояние A, т.е. подарила бы ему fallback 540 — ровно та ловушка, от которой уходит вся фича. Это hard rule: **ни одна кнопка в приложении не пишет в лимит `NULL`.**
+**Почему установка галки не пишет `NULL`:** запись `NULL` вернула бы неделю в состояние A, т.е. подарила бы ему fallback 540 — ровно та ловушка, от которой уходит вся фича. Это hard rule: **ни одна кнопка в приложении не пишет в лимит `NULL`.**
 
-**`unsaved` — четвёртое состояние ячейки** (дополняет `idle / saving / success / error` из §`<LimitsRow>`):
+**`unsaved` — четвёртое состояние поля** (дополняет `idle / saving / success / error`):
 
 | Аспект | Значение |
 |---|---|
 | Инпут | `border-warning bg-warning/5 focus:border-warning` |
 | Под-строка | `text-[11px] text-warning-dark dark:text-warning` = `limits.unsaved` («Nie zapisano — obowiązuje 0 km») |
-| Поверхность строки | **остаётся `bg-input/40`** (состояние B) — в БД по-прежнему ноль, и строка честно об этом говорит |
+| Плитка недели | **показывает состояние B** (`wył.`, приглушение, если суббота тоже выключена) — в БД по-прежнему ноль, и плитка честно об этом говорит |
 | a11y | `aria-describedby` инпута → id под-строки; при авто-возврате галки — `role="status"` sr-only «Gwarancja pozostaje wyłączona» |
 
-Ключевой смысл: галка стоит, а строка всё ещё выглядит выключенной — это не баг вёрстки, это правда («пока не введёшь число, действует 0»).
+Ключевой смысл: галка стоит, а неделя всё ещё выглядит выключенной — это не баг вёрстки, это правда («пока не введёшь число, действует 0»).
 
 **Память о прежнем значении (session-local).** При снятии галки компонент запоминает последнее `> 0` значение в локальном state. При повторной установке галки в том же сеансе инпут **предзаполняется** этим числом как черновик — но всё ещё в состоянии `unsaved`, запись происходит только по blur. Это снимает раздражение «выключил случайно — потерял 540», не нарушая правило «установка галки ничего не пишет». Если памяти нет (страница перезагружена) — инпут пустой, `unsaved` с полной подсказкой `limits.unsavedHint`.
 
-**Подтверждения на одиночное выключение нет.** Один клик, мгновенно обратимый, значение помнится в сессии, ставка сохраняется, событие уходит в аудит. Диалог здесь был бы церемонией. Подтверждение появляется только у массовой операции (§16.4), где необратимость реальна.
+**Подтверждения на одиночное выключение нет.** Один клик, мгновенно обратимый, значение помнится в сессии, ставка сохраняется, событие уходит в аудит. Диалог здесь был бы церемонией. Подтверждение появляется только у массовой операции (§18.6.2), где необратимость реальна.
 
-**Смена года / уход со страницы при наличии `unsaved`-ячеек** не блокируется и не подтверждается: черновик ничего не изменил в БД, а состояние на сервере (0) уже корректно отражено в строке.
+**Смена недели / года / уход со страницы при наличии `unsaved`-полей** не блокируется и не подтверждается: черновик ничего не изменил в БД, а состояние на сервере (0) уже корректно отражено в плитке.
 
-### §16.4 — `<BulkLimitsDialog>` — массовое применение к диапазону месяцев
+### ~~§16.4 — `<BulkLimitsDialog>` — массовое применение к диапазону месяцев~~ — SUPERSEDED by §18.6 (2026-10-29)
 
-Триггер: кнопка в шапке страницы, рядом с переключателем года — `<Button variant="outline" size="sm"><CalendarRange size={14}/> Zastosuj do wielu miesięcy</Button>`. Не primary: основной сценарий страницы — точечная правка, массовая операция вторична.
+Отдельного диалога больше нет: массовая правка = **выделение недель в календаре + та же панель** (§18.6.1 — жесты выделения, §18.6.2 — панель при N > 1). `<BulkLimitsDialog>` удаляется вместе с режимами диапазона «Cały rok / Od – do / Wybrane miesiące» и `<MultiSelect>` месяцев.
 
-Поверхность — **`<FormDialog>` (§13.1), `sm:max-w-[900px]`**, а не `<ConfirmDialog>`: внутри форма + живая сводка, которые в `max-w-md` не живут.
-
-**Три секции в `FormDialogBody` (`space-y-6`, заголовки — `<FormSection title>`):**
-
-**1. `Zakres`.** Три взаимоисключающих режима — radio-группа, отрисованная как сегменты (`role="radiogroup"`, каждый сегмент — `<label>` с `border-border` / выбранный `border-brand/60 bg-brand-50/40 dark:bg-brand/10`, рецепт нажатого KPI-кафеля §15.1):
-
-| Режим | Контрол | Дефолт |
-|---|---|---|
-| «Cały rok {year}» | — | ✔ выбран |
-| «Od – do» | два `<Select>` месяцев (`Od`, `Do`); если `Do < Od` — границы меняются местами молча, ошибку не показываем | — |
-| «Wybrane miesiące» | `<MultiSelect>` с 12 месяцами, `sort={false}` (календарный порядок важнее алфавитного) | — |
-
-Область действия — **только выбранный на странице год**. Кросс-годовой диапазон не поддерживается; год печатается в заголовке диалога и в подписи кнопки, чтобы это не пришлось угадывать.
-
-**2. `Wartości`.** Здесь форма **сознательно отличается** от строки таблицы: у строки два состояния (вкл/выкл), у массовой операции их три — вкл, выкл и **«не трогать»**. Чекбокс третье состояние честно выразить не может (indeterminate, переключаемый кликом, — гадание), поэтому:
-
-| Поле | Контрол | Опции |
-|---|---|---|
-| `Km / dzień` | `<Select>` действия | «Bez zmian» (default) · «Włącz i ustaw wartość» · «Wyłącz (0 km)» |
-| `Km / sobota` | `<Select>` действия | те же три |
-| `Stawka € / km` | просто `<Input>` | пусто = «bez zmian» (`placeholder="bez zmian"`); у ставки нет вкл/выкл (§16.1) |
-
-Числовой инпут для km появляется только при «Włącz i ustaw wartość» — через `RevealInset` (§13.2.1), чтобы подполе читалось как принадлежащее своему селекту. «Włącz и ustaw» с пустым значением — ошибка сабмита `limits.bulk.errorValueRequired`, а не тихая запись нуля (иначе мы бы воспроизвели ту же двусмысленность, что чиним).
-
-**3. `Podsumowanie` — обязательная честная сводка.** Живая, пересчитывается на каждое изменение формы, стоит **над футером** и содержит:
-
-- Заголовок: `limits.bulk.summaryHeadline` — «Zmienisz **9** z **12** miesięcy roku 2026.»
-- Строка перезаписи: `limits.bulk.summaryOverwrite` — «6 miesięcy ma już ustawione wartości — zostaną nadpisane.» (считает только месяцы в состоянии C/B, т.е. те, где что-то реально затирается).
-- Строка необратимости: `limits.bulk.summaryIrreversible` — «Operacji nie można cofnąć. Poprzednie wartości pozostaną widoczne w audycie.»
-- **Таблица «Obecnie → Po zmianie»**, максимум 12 строк (скролла не будет):
-
-```
-Miesiąc     Km/dzień              Km/sobota          Stawka €/km
-Styczeń     540      →  0         wyłączone → —      0,50 → bez zmian
-Luty        brak (dom.) →  600    wyłączone → 300    0,50 → 0,52
-Marzec      600      →  bez zmian …
-```
-
-| Слот | Оформление |
-|---|---|
-| Старое значение | `text-text-sub tabular-nums` |
-| Стрелка | `<ArrowRight size={12} className="text-text-sub" />` (не символ `→` в тексте — иконка, чтобы скринридер не читал «стрелка вправо» 36 раз; вокруг колонки `<th>`-подписи `Obecnie` / `Po zmianie`) |
-| Новое значение | `font-semibold text-text tabular-nums` |
-| Без изменений | `text-text-sub` «bez zmian», вся ячейка приглушена |
-| Строка, где вообще ничего не меняется | вся `<tr>` `text-text-sub`, считается отдельно: `limits.bulk.summaryNoop` |
-| Пустое значение в «Obecnie» | **никогда не пустая ячейка** — «brak (domyślne)» для A, «wyłączone» для B |
-
-Именно эта таблица и есть подтверждение. **Второго, вложенного `<ConfirmDialog>` нет** — стек диалогов хуже, чем одна честная сводка, а primary-кнопка у нас и так брендово-красная. Финальная кнопка **называет объём**: `limits.bulk.apply` = «Zastosuj do **9** miesięcy» (правило §6.5.12 «кнопка называет то, что коммитит»; голое «Zapisz» запрещено).
-
-**Футер:** `[Anuluj (ghost)] [Zastosuj do {n} miesięcy (primary)]`. Primary `disabled`, пока нет ни одного выбранного месяца или ни одного изменения (`errorNoMonths` / `errorNoChanges` рендерится `mr-auto text-sm text-danger role="alert"` — стандартный validation-summary слот §13.1).
-
-**Результат и частичный отказ.** Диалог закрывается только при полном успехе → `toast.success(limits.bulk.successToast)`. При провале части месяцев диалог **остаётся открытым**, и таблица сводки превращается в таблицу результата: у каждой строки статус-слот — `<Check size={14} className="text-success"/>` / `<X size={14} className="text-danger"/>`; в футере появляется `<Button variant="outline">Ponów nieudane</Button>`. Пер-строчный результат — единственный честный способ показать частичную запись.
-
-> **Зависимость (не дизайнерское решение, вопрос к api-agent):** если бэкенд даст **один** bulk-эндпоинт с атомарной транзакцией, слой «пер-строчный результат» не понадобится — останется просто success/error. Если это N последовательных `PUT`, пер-строчный результат обязателен. Дизайн поддерживает оба варианта; предпочтителен атомарный.
+Перенесено в §18.6.2 без изменения смысла: три исхода на поле («Bez zmian» / «Włącz i ustaw wartość» / «Wyłącz (0 km)») через `<Select>`, а не чекбокс (третье состояние «не трогать» чекбокс честно не выражает); пустая ставка = без изменений; «Ustaw» без значения — ошибка, а не тихий ноль; обязательная живая сводка + таблица «Obecnie → Po zmianie» без пустых ячеек; кнопка называет объём; второго вложенного `<ConfirmDialog>` нет; правка в рамках одного года. Слой пер-строчного результата («Ponów nieudane») не нужен: bulk-запись атомарная.
 
 ### §16.5 — Выключенный месяц в разбивке: `<BreakdownTable>` (перевозчик + staff), смешанный период по tablicy km
 
-Самая рискованная часть фичи: без пометок месяц с нулями читается как баг или как «у них что-то не настроено».
+Самая рискованная часть фичи: без пометок неделя с нулями читается как баг или как «у них что-то не настроено». (2026-10-29: строка разбивки — неделя ISO; раскладка строк — §18.7.)
 
 > ⚠️ **REWORK 2026-09-24 ([docs/20 §0⁵](20-phase-7-eksport-weryfikator.md)).** Смешанный период (есть выключенный месяц **и** есть активный) больше **не** делит заявленный пробег пропорционально дням. Км, вычитаемые из гарантии, — это **фактические** км с tablicy km weryfikatora за дни активных месяцев; цифра перевозчика на выплату не влияет. День активного месяца без записи на tablicy **не угадывается**: `ZAAKCEPTOWANO` недоступно, пока weryfikator не допишет; `ODRZUCONO` и «Zapisz weryfikację» — доступны всегда.
 >
@@ -8148,12 +8059,12 @@ Marzec      600      →  bez zmian …
 
 #### §16.5.1 Как UI понимает, что месяц выключен и что период смешанный
 
-Состояние **месяца** производится из уже существующих полей `MonthBreakdownDto` — **новых API-полей на уровне месяца не требуется**:
+Состояние **недели** (2026-10-29: строка разбивки — неделя ISO, §18.7) производится из полей строки разбивки, без отдельного флага:
 
 | Признак | Условие | Трактовка |
 |---|---|---|
-| `disabled` | `kmPerDay === 0 && kmPerSaturday === 0` | гарантии нет весь месяц |
-| `saturdayOnly` | `kmPerDay === 0 && kmFromSaturdays > 0` | будни выключены, субботы работают |
+| `disabled` | `kmPerDay === 0 && kmPerSaturday === 0` | гарантии нет всю неделю |
+| `saturdayOnly` | `kmPerDay === 0 && kmPerSaturday > 0` | будни выключены, суббота с гарантией (бейдж ставится, даже если сама суббота не зачтена — колонка «Sob.» покажет `0`) |
 | обычный | иначе | без пометок |
 
 Состояние **периода**. «Весь выключен» — по строкам, как было; **«смешанный» — только по серверному флагу**, из строк не выводится:
@@ -8170,22 +8081,23 @@ Marzec      600      →  bez zmian …
 
 | Период | Перевозчик | Staff |
 |---|---|---|
-| все месяцы активны (`mileageSource !== 'board'`) | как сегодня, без ноты | как сегодня: без колонок tablicy, без ноты, без гейта |
+| все недели активны (`mileageSource !== 'board'`) | как сегодня, без ноты | как сегодня: без колонок tablicy, без ноты, без гейта |
 | смешанный (`'board'`) | §16.5.2 + нота `audience="carrier"` (§16.5.3) | §16.5.2 + нота `audience="staff"` (§16.5.3) + колонки tablicy (§16.5.5) + «brak danych» / гейт в `ClaimModal` (§16.5.6) |
 | весь период выключен | `<EmptyState>` (§16.5.4) | `<EmptyState>` (§16.5.4); колонок, ноты и гейта нет |
 
-#### §16.5.2 Оформление месяца
+#### §16.5.2 Оформление недели
 
 | Слот | `disabled` | `saturdayOnly` |
 |---|---|---|
-| Строка / карточка | `bg-input/40` | обычная (ничего не приглушаем — месяц платит) |
-| Метка у месяца | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Gwarancja wyłączona</Badge>` | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Gwarancja tylko w soboty</Badge>` |
+| Строка | `bg-input/40` | обычная (ничего не приглушаем — неделя платит) |
+| Метка у недели | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Gwarancja wyłączona</Badge>` | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Tylko sobota</Badge>` |
 | `Km/dz.` | `0` в `text-text-sub` | `0` в `text-text-sub` |
+| `Sob.` | `—` | число / `0` (§18.7.1) |
 | `€/km` | **`—`** + нативный `title={t('rateNoneTitle')}` | обычная ставка |
-| `Km/mc` | `0` в `text-text-sub` (снимаем `font-semibold` — нечего подчёркивать) | обычная |
-| Карточный вариант (`< 34rem`) | бейдж под названием месяца; строка `€/km` **не рендерится вовсе** (в карточке строку можно убрать, в таблице — только поставить `—`) | как обычно |
+| `Km/tydz.` | `0` в `text-text-sub` (снимаем `font-semibold` — нечего подчёркивать) | обычная |
+| Узкий вариант (`< 36rem`, свёрнутые строки §18.7.3) | короткий бейдж «Wyłączona» в свёрнутой строке; в раскрытии строки `€/km` **нет вовсе** (в `<dl>` строку можно убрать, в таблице — только поставить `—`) | короткий бейдж «Tylko sob.» |
 
-**Ставка-призрак — отдельное правило (locked).** Движок при `kmGuaranteed = 0` отдаёт `ratePerKmEffective` как глобальный fallback `0,50` — это артефакт вычисления, а не решение человека. **Везде, где `kmGuaranteed === 0`, ставка рендерится как `—`, а не как число:** в `<BreakdownTable>` (per-month и footer), в stat-карточках `<LivePreviewPanel>`, в §6.5 `ClaimModal`. Формулировка правила: *цена километра имеет смысл только при ненулевом количестве километров; ноль километров по 0,50 € — это не цена, это шум, который выглядит как обещание.*
+**Ставка-призрак — отдельное правило (locked).** Движок при `kmGuaranteed = 0` отдаёт `ratePerKmEffective` как глобальный fallback `0,50` — это артефакт вычисления, а не решение человека. **Везде, где `kmGuaranteed === 0`, ставка рендерится как `—`, а не как число:** в `<BreakdownTable>` (по неделям и footer), в stat-карточках `<LivePreviewPanel>`, в §6.5 `ClaimModal`. Формулировка правила: *цена километра имеет смысл только при ненулевом количестве километров; ноль километров по 0,50 € — это не цена, это шум, который выглядит как обещание.*
 
 **2026-09-24: всё в §16.5.2 остаётся без изменений и для перевозчика, и для staff** — смена правила расчёта не касается того, как выглядит выключенный месяц. Единственное дополнение — staff-колонки tablicy km в `disabled`-месяце: обе ячейки `—` (правило то же, что у ставки-призрака: число, которое не участвует в расчёте, не печатается), детали в §16.5.5.
 
@@ -8200,15 +8112,15 @@ Marzec      600      →  bez zmian …
 | Элемент | существующий `<LockNotice icon={Info}>` в обёртке `border-b border-border p-3` — **как сейчас в коде**, без изменений оформления |
 | Иконка | `Info` — нейтральная, **не** semantic-цветная |
 | Выделение | `t.rich(..., { b })` → `<strong className="font-semibold text-text">` — только на последнем предложении (carrier) / на предложении про цифру перевозчика (staff) |
-| Тон | **нейтральный, не warning.** Выключенный месяц — действующая конфигурация, а не ошибка. Недостающие дни tablicy — отдельная, янтарная плашка **только у staff** (§16.5.6), в эту ноту их не смешиваем |
-| Параметры | только `count` = число `disabled`-месяцев. **Никаких чисел км и дней** — ни у перевозчика, ни у staff |
+| Тон | **нейтральный, не warning.** Выключенная неделя — действующая конфигурация, а не ошибка. Недостающие дни tablicy — отдельная, янтарная плашка **только у staff** (§16.5.6), в эту ноту их не смешиваем |
+| Параметры | только `count` = число недель с выключенной гарантией в будни (§16.5.9 п. 3). **Никаких чисел км и дней** — ни у перевозчика, ни у staff |
 
 **Перевозчик — `carrier.breakdown.mixedPeriodNotice`** (заменяет `gapNotice` + `gapNoticeMonth`):
 
-> ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. **Ostateczną kwotę ustala się po weryfikacji wniosku.**
+> ⓘ Okres obejmuje tydzień bez gwarancji. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. **Ostateczną kwotę ustala się po weryfikacji wniosku.**
 
 Зачем каждое предложение:
-1. *Okres obejmuje…* — почему в таблице нулевая строка (какой месяц — видно по бейджу строкой ниже, поэтому список месяцев из ноты убран вместе с `gapNoticeMonth`).
+1. *Okres obejmuje…* — почему в таблице нулевая строка (какая неделя — видно по бейджу в строке, поэтому список недель в ноте не нужен).
 2. *Dopłata zależy wtedy od…* — **обязательное**: в смешанном периоде превью перевозчика **не реагирует** на поле «Przebieg» в форме. Без этой фразы перевозчик меняет число, видит ту же dopłatę и решает, что форма сломана. Источник («tablica km weryfikatora», SpedTrans) перевозчику не называем — ему достаточно знать, что считается пробег по дням, а не его итоговая цифра.
 3. *Ostateczną kwotę ustala się po weryfikacji wniosku.* — сумма в превью и в поданном wniosku может быть посчитана без последнего дня (tablica за день съезда заполняется назавтра). Предложение в безличном настоящем времени — истинно и до, и после решения, поэтому один текст для формы, превью и страницы wniosku.
 
@@ -8217,16 +8129,16 @@ Marzec      600      →  bez zmian …
 | Вопрос | Решение | Почему |
 |---|---|---|
 | Видит ли перевозчик `mileageEffective`? | **Нет — нигде.** Ни в ноте, ни строкой «Razem», ни в карточке | Цифра может быть неполной (нет дня съезда), а предупреждать про недостающий день перевозчику решено **не** показывать (docs/20 §0⁵). Неполное число без предупреждения хуже, чем никакого |
-| Пер-месячные / пер-дневные км tablicy | **Нет** | решение docs/20 §0⁵ |
+| Пер-недельные / пер-дневные км tablicy | **Нет** | решение docs/20 §0⁵ |
 | Предупреждение о незаписанном последнем дне | **Нет** | решение docs/20 §0⁵; третье предложение ноты закрывает это общим «сумма окончательна после weryfikacji» |
-| Stat-карточки `<LivePreviewPanel>` (Km gwarantowane / Różnica km / Stawka / Dopłata) | **Без изменений** | это существующий контракт превью; `Różnica km` — агрегат периода, не пер-месячная цифра tablicy. Нота объясняет, почему `Różnica km ≠ Km gwarantowane − Przebieg` |
-| Бейджи «Gwarancja wyłączona» / «Gwarancja tylko w soboty», `bg-input/40`, `Km/mc` без веса | **Остаются как есть** (§16.5.2) | |
+| Stat-карточки `<LivePreviewPanel>` (Km gwarantowane / Różnica km / Stawka / Dopłata) | **Без изменений** | это существующий контракт превью; `Różnica km` — агрегат периода, не пер-недельная цифра tablicy. Нота объясняет, почему `Różnica km ≠ Km gwarantowane − Przebieg` |
+| Бейджи «Gwarancja wyłączona» / «Tylko sobota», `bg-input/40`, `Km/tydz.` без веса | **Остаются как есть** (§16.5.2) | |
 | Правило `—` вместо ставки-призрака | **Остаётся как есть** (§16.5.2) | |
 | Страница wniosku `/carrier/claims/[nrZgl]` | та же нота, тот же текст | `<BreakdownTable>` один и тот же; «Przebieg: X km» в фактах остаётся — это то, что перевозчик заявил |
 
 **Staff — `carrier.breakdown.boardNotice`** (pracownik / admin; тот же компонент, `audience="staff"`):
 
-> ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. **Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.**
+> ⓘ Okres obejmuje tydzień bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w tygodniach z gwarancją. **Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.**
 
 Выделенное предложение — главное для pracownik: поле «Przebieg / km zrealizowane» в `ClaimModal` остаётся редактируемым, но в смешанном периоде живой пересчёт на него **не реагирует**. Без этой строки правка км, не меняющая dopłatę, читается как баг `<RecalcBadge>`.
 
@@ -8248,7 +8160,7 @@ Marzec      600      →  bez zmian …
 
 > **Вне зоны дизайна (вопрос владельцу процесса):** блокировать ли подачу wniosek-а, когда весь период без гарантии. Здесь зафиксировано только визуальное поведение превью. Существующий гейт §6.5.5 («Gwarancja wyjeżdżona — wniosek można tylko odrzucić» при `kmDifference <= 0`) в этом случае и так срабатывает на стороне сотрудника.
 
-> **2026-09-24:** отказ сервера при подаче смешанного периода без недобега («W miesiącach objętych gwarancją przebieg jest równy lub wyższy niż km gwarantowane (X). Brak podstaw do dopłaty.») — серверный текст, показывается существующим путём 4xx-ошибки формы; отдельного ключа не заводим. Как и все серверные 4xx сегодня, он только по-польски.
+> **2026-09-24:** отказ сервера при подаче смешанного периода без недобега («W miesiącach objętych gwarancją przebieg jest równy lub wyższy niż km gwarantowane (X). Brak podstaw do dopłaty.») — серверный текст, показывается существующим путём 4xx-ошибки формы; отдельного ключа не заводим. Как и все серверные 4xx сегодня, он только по-польски. **2026-10-29:** формулировку «W tygodniach objętych gwarancją…» меняет api (текст сервера, не i18n web).
 
 #### §16.5.5 Staff: колонки tablicy km в `<BreakdownTable>` (NEW 2026-09-24)
 
@@ -8256,52 +8168,27 @@ Marzec      600      →  bez zmian …
 
 - `boardSettlement` передаёт **только** `ClaimModal` (pracownik / admin). `LivePreviewPanel` и страница wniosku перевозчика его не передают — API перевозчику это поле не отдаёт. Роль компонент **не проверяет**: вариант определяется данными (§16.5.1).
 - Prop `mileage` **удаляется** — он кормил только старую ноту `gapNotice`. Вызовы: `LivePreviewPanel.tsx`, `app/(carrier)/carrier/claims/[nrZgl]/page.tsx`, `ClaimModal.tsx` (`DoplataBlock`).
-- В `ClaimModal` брать **`claim.boardSettlement` в паре с `claim.breakdown`** — один DTO, одни даты. Не смешивать `boardSettlement` из живого превью с persisted `claim.breakdown`: при правке дат месяцы разъедутся. (Если когда-нибудь разбивка в модалке переедет на живой breakdown — брать оба из превью.)
-- Колонки рендерятся только при `mileageSource === 'board'` **и** наличии `boardSettlement`. Период «все месяцы активны» у staff выглядит **ровно как сегодня** — даже если API вдруг пришлёт `boardSettlement` и для него.
-- Соединение: `boardSettlement.months` → строки breakdown по `yearMonth`. Месяц без пары → обе ячейки `—` (защитно; в норме не случается).
+- В `ClaimModal` брать **`claim.boardSettlement` в паре с `claim.breakdown`** — один DTO, одни даты. Не смешивать `boardSettlement` из живого превью с persisted `claim.breakdown`: при правке дат недели разъедутся. (Если когда-нибудь разбивка в модалке переедет на живой breakdown — брать оба из превью.)
+- Колонки рендерятся только при `mileageSource === 'board'` **и** наличии `boardSettlement`. Период «все недели активны» у staff выглядит **ровно как сегодня** — даже если API вдруг пришлёт `boardSettlement` и для него.
+- Соединение: недели `boardSettlement` → строки breakdown **по ключу недели** (2026-10-29; раньше `months` по `yearMonth`). Неделя без пары → обе ячейки `—` (защитно; в норме не случается).
 
-**Ячейки по режиму месяца** (`mode` из `boardSettlement.months[]`):
+**Ячейки по режиму недели** (`mode` из недель `boardSettlement`):
 
-| Месяц | «Km wg weryfikatora» | «Wpisane dni» |
+| Неделя | «Km wg weryfikatora» | «Wpisane dni» |
 |---|---|---|
 | `off` | `—`, `text-text-sub`, `title={t('boardOffTitle')}` | `—`, `text-text-sub` |
-| `active`, `daysFilled === daysRequired` | `formatInt(km)`, `font-semibold text-text tabular-nums` (тот же вес, что `Km/mc`: это пара «gwarantowano → przejechano») | `boardDaysValue` → «14 z 14», `text-text tabular-nums` |
-| `active`, `daysFilled < daysRequired` | как строкой выше — число показываем, сигнал несёт соседняя ячейка | `<AlertTriangle size={12} aria-hidden className="shrink-0" />` + «13 z 14» в `inline-flex items-center justify-end gap-1 font-semibold text-warning-dark dark:text-warning` + `<span className="sr-only">, {t('boardDaysMissingSr', { count: daysRequired − daysFilled })}</span>` |
-| `saturdaysOnly` | `formatInt(km)` — км только зачётных суббот | `boardSaturdaysValue` → «2 z 2 sob.» — единица подписана, иначе «2 z 2» читается как «2 дня месяца». Неполно → та же янтарная трактовка |
+| `active`, `daysFilled === daysRequired` | `formatInt(km)`, `font-semibold text-text tabular-nums` (тот же вес, что `Km/tydz.`: это пара «gwarantowano → przejechano») | `boardDaysValue` → «5 z 5», `text-text tabular-nums` |
+| `active`, `daysFilled < daysRequired` | как строкой выше — число показываем, сигнал несёт соседняя ячейка | `<AlertTriangle size={12} aria-hidden className="shrink-0" />` + «4 z 5» в `inline-flex items-center justify-end gap-1 font-semibold text-warning-dark dark:text-warning` + `<span className="sr-only">, {t('boardDaysMissingSr', { count: daysRequired − daysFilled })}</span>` |
+| `saturdaysOnly` | `formatInt(km)` — км зачётной субботы | `boardSaturdaysValue` → «1 z 1 sob.» — единица подписана, иначе «1 z 1» читается как «1 день недели». Неполно → та же янтарная трактовка |
 | любой, `daysRequired === 0` | `—` | `—` |
 
 Янтарь никогда не единственный сигнал: иконка + sr-only (WCAG 1.4.1). Контраст — существующая проверенная пара (`text-warning-dark` на `bg-card` light, `text-warning` на `bg-card` dark).
 
-**Широкая таблица.** Порядок: `Miesiąc | Dni rob. | Km/dz. | €/km | Km/mc | Km wg weryfikatora | Wpisane dni`. Колонки tablicy стоят **сразу справа от `Km/mc`** — строка читается парой «gwarantowano X → przejechano Y», итог «Razem» — той же парой, а это и есть весь расчёт (`Σ gwarancji − Σ tablicy`). Граница «gwarancja | tablica km» — `border-l border-border` на первой колонке tablicy (в `th`, каждом `td` и `tfoot`). Заголовки — существующий класс `th`, `whitespace-nowrap`, выравнивание вправо, полные подписи (сокращать не нужно — см. порог ниже).
+**Раскладка — §18.7.2 (широкая таблица, порог 46rem) и §18.7.3 (свёрнутые строки)** (2026-10-29, заменяет месячную таблицу на 7 колонок, карточки и порог 40rem). Остаётся в силе:
 
-- Под-строки «Soboty» и «Dni wyłączone»: `colSpan` 5 → **7**, когда колонки tablicy есть.
-- `tfoot`: лейбл `colSpan={4}` → **`total` «Razem»** (вместо «Razem (km gwarant.)» — под одним лейблом теперь два разных итога, что есть что — говорят заголовки колонок) | `kmGuaranteed` | `boardSettlement.mileageEffective` (`border-l`) | пустая ячейка. Итог колонки «Km wg weryfikatora» берётся **из того же живого `boardSettlement`, что и её строки** (Σ `months[].km`), поэтому колонка всегда сходится; **не** `breakdown.mileageEffective` — это км последнего расчёта wniosku (подача / верификация / решение), они устаревают, как только weryfikator дописал день. Выплату этот итог не показывает — сумма живёт только в поле dopłaty. «Wpisane dni» **не** суммируем: дни и субботы разных месяцев не складываются в осмысленное число; недостающие даты перечисляет §16.5.6.
-
-```
-┌ ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — … ─────────┐
-│ MIESIĄC                        DNI ROB.  KM/DZ.  €/KM   KM/MC │ KM WG WERYFIKATORA   WPISANE DNI │
-│ 2025-08 [Gwarancja wyłączona]       5       0     —        0 │                  —             — │ ← bg-input/40
-│ 2025-09                            14     540  0,50    7 560 │              2 000    ⚠ 13 z 14  │
-│ RAZEM                                                  7 560 │              2 000               │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Порог «таблица / карточки».** С колонками tablicy таблица становится 7-колоночной — на 34rem она не помещается без сжатия. **Staff-вариант переключается на 40rem**: карточки `@max-[40rem]:block @min-[40rem]:hidden`, таблица `@max-[40rem]:hidden @min-[40rem]:block`. Перевозчик и staff без колонок — по-прежнему 34rem. Классы **литеральные** (Tailwind v4 сканирует исходник, интерполяция `@min-[${bp}]` не сгенерирует CSS): два полных набора строк, выбор через `cn(boardMode ? '…40rem…' : '…34rem…')`. В `ClaimModal` (`max-w-4xl`, тело ≈ 52rem) на десктопе staff видит таблицу; карточки — на планшете / телефоне.
-
-**Узкий вид (карточки, контейнер < 40rem).** В карточке `active` / `saturdaysOnly`-месяца после существующих строк `dl` — блок tablicy: **две строки на всю ширину** (`col-span-2`; «Km wg weryfikatora» не помещается в полширины карточки) под разделителем `border-t border-border/60 pt-2` — тем же, что у строки «Soboty». Если у месяца есть и «Soboty», блок tablicy идёт **после** неё.
-
-```
-┌ 2025-09 ─────────────────────────────────┐
-│ Dni rob.        14   Km/dz.         540   │
-│ €/km          0,50   Km/mc        7 560   │
-│ ───────────────────────────────────────── │
-│ Km wg weryfikatora                2 000   │
-│ Wpisane dni                   ⚠ 13 z 14   │
-└───────────────────────────────────────────┘
-```
-
-- `off`-месяц: блок tablicy **не рендерится** (в карточке строку можно убрать — то же правило, что для `€/km`, §16.5.2).
-- Итоговая плашка под карточками (`bg-bg`): вторая строка `boardTotalKm` «Razem (km wg weryfikatora)» + `boardSettlement.mileageEffective` (тот же живой итог, что в `tfoot`), тем же стилем, что «Razem (km gwarant.)», между строками `mt-1.5`.
+- Колонки tablicy стоят **сразу справа от `Km/tydz.`** — строка читается парой «gwarantowano X → przejechano Y», итог «Razem» — той же парой, а это и есть весь расчёт (`Σ gwarancji − Σ tablicy`). Граница «gwarancja | tablica km» — `border-l border-border` на первой колонке tablicy (в `th`, каждом `td` и `tfoot`). Заголовки — существующий класс `th`, `whitespace-nowrap`, выравнивание вправо, полные подписи.
+- `tfoot`: **`total` «Razem»** (вместо «Razem (km gwarant.)» — под одним лейблом два разных итога, что есть что — говорят заголовки колонок) | `kmGuaranteed` | `boardSettlement.mileageEffective` (`border-l`) | пустая ячейка. Итог колонки «Km wg weryfikatora» берётся **из того же живого `boardSettlement`, что и её строки**, поэтому колонка всегда сходится; **не** `breakdown.mileageEffective` — это км последнего расчёта wniosku (подача / верификация / решение), они устаревают, как только weryfikator дописал день. Выплату этот итог не показывает — сумма живёт только в поле dopłaty. «Wpisane dni» **не** суммируем: дни и субботы разных недель не складываются в осмысленное число; недостающие даты перечисляет §16.5.6.
+- В узком виде у `off`-недели блока tablicy нет; итоговая плашка (`bg-bg`) получает вторую строку `boardTotalKm` «Razem (km wg weryfikatora)» + тот же живой итог, что в `tfoot`, между строками `mt-1.5`.
 
 #### §16.5.6 Staff: плашка «brak danych» + гейт `ZAAKCEPTOWANO` в `ClaimModal` (NEW 2026-09-24)
 
@@ -8340,7 +8227,7 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 | Даты | `<ul aria-label={t('datesLabel')} className="mt-2 flex flex-wrap gap-1.5">`, каждая `<li className="rounded border border-warning/40 bg-card px-1.5 py-0.5 text-xs tabular-nums text-text">` |
 | Подсказка дня съезда | `<p className="mt-2 text-xs text-text-sub">` ← `boardGate.returnDayHint`, **только** если `missingDates` содержит последний день периода (`claim.dateEnd.slice(0, 10)`) |
 
-- **Источник дат:** `boardSettlement.missingDates` (верхнего уровня — уже только активные месяцы). `count` в заголовке = его длина. Сортировать по возрастанию защитно.
+- **Источник дат:** `boardSettlement.missingDates` (верхнего уровня — уже только активные недели). `count` в заголовке = его длина. Сортировать по возрастанию защитно.
 - **Формат даты:** `Intl.DateTimeFormat(locale === 'pl' ? 'pl-PL' : 'en-GB', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })`, `YYYY-MM-DD` парсится как **локальная** дата (`new Date(y, m − 1, d)`, как `formatExcludedDate` в `BreakdownTable`) — без UTC-сдвига. Год всегда: период может пересекать Новый год. Пунктуация — та, что даёт Intl (≈ «czw., 18.09.2025» / «Thu, 18/09/2025»).
 - **Свёртка длинного списка:** ≤ 8 дат — все. > 8 — первые 6 + кнопка `boardGate.showAll` «Pokaż wszystkie (14)»; развёрнуто — все + `boardGate.showLess` «Zwiń». Кнопка: `<button type="button" aria-expanded={open} className="mt-1.5 py-1 text-xs font-semibold text-text underline-offset-2 hover:underline">`. Скрывать 1–2 даты ради кнопки бессмысленно — отсюда порог 8, а не 6. Число в заголовке всегда полное.
 - Если `complete === false`, но `missingDates` пуст (защитно) — список и кнопка не рендерятся; заголовок берёт ветку `=0` («Brak danych na tablicy km»).
@@ -8349,7 +8236,7 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 ┌ DECYZJA ───────────────────────────────────────────────────────────┐
 │ ┌ [CalendarX] Brak danych za 2 dni ─────────────────────────────┐ │  ← amber, role=status
 │ │ Weryfikator nie wpisał jeszcze przebiegu na tablicy km za      │ │
-│ │ poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek…   │ │
+│ │ poniższe dni w tygodniach z gwarancją. Zaakceptować wniosek…   │ │
 │ │ [śr., 17.09.2025] [czw., 18.09.2025]                           │ │
 │ │ Ostatni dzień okresu to zwykle dzień zjazdu — …                │ │
 │ └────────────────────────────────────────────────────────────────┘ │
@@ -8370,17 +8257,19 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 
 #### §16.5.7 i18n (2026-09-24) — готово к вставке
 
+> **2026-10-29:** `mixedPeriodNotice`, `boardNotice`, `boardOffTitle` (PL + EN) и `boardGate.body` переписаны ниже на недели («tydzień / w tygodniach z gwarancją»). Остальные ключи — без изменений. Новые ключи разбивки по неделям — §18.9.
+
 **`messages/pl.json` → `carrier.breakdown`:** **удалить** `gapNotice`, `gapNoticeMonth`; **добавить**:
 
 ```json
-"mixedPeriodNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
-"boardNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
+"mixedPeriodNotice": "Okres obejmuje {count, plural, one {tydzień bez gwarancji} few {tygodnie bez gwarancji} many {tygodni bez gwarancji} other {tygodnia bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
+"boardNotice": "Okres obejmuje {count, plural, one {tydzień bez gwarancji} few {tygodnie bez gwarancji} many {tygodni bez gwarancji} other {tygodnia bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w tygodniach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
 "boardKm": "Km wg weryfikatora",
 "boardDays": "Wpisane dni",
 "boardDaysValue": "{filled} z {required}",
 "boardSaturdaysValue": "{filled} z {required} sob.",
 "boardDaysMissingSr": "brak danych za {count, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
-"boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym miesiącu",
+"boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym tygodniu",
 "total": "Razem",
 "boardTotalKm": "Razem (km wg weryfikatora)"
 ```
@@ -8388,14 +8277,14 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 **`messages/en.json` → `carrier.breakdown`:** **удалить** `gapNotice`, `gapNoticeMonth`; **добавить**:
 
 ```json
-"mixedPeriodNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
-"boardNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed months count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
+"mixedPeriodNotice": "The period includes {count, plural, one {a week} other {weeks}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
+"boardNotice": "The period includes {count, plural, one {a week} other {weeks}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed weeks count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
 "boardKm": "Km per verifier",
 "boardDays": "Days entered",
 "boardDaysValue": "{filled} of {required}",
 "boardSaturdaysValue": "{filled} of {required} Sat.",
 "boardDaysMissingSr": "no data for {count, plural, one {# day} other {# days}}",
-"boardOffTitle": "Not counted — the guarantee is disabled for this month",
+"boardOffTitle": "Not counted — the guarantee is disabled for this week",
 "total": "Total",
 "boardTotalKm": "Total (km per verifier)"
 ```
@@ -8405,7 +8294,7 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 ```json
 "boardGate": {
   "title": "{count, plural, =0 {Brak danych na tablicy km} one {Brak danych za # dzień} few {Brak danych za # dni} many {Brak danych za # dni} other {Brak danych za # dni}}",
-  "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
+  "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w tygodniach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
   "datesLabel": "Dni bez przebiegu na tablicy km",
   "showAll": "Pokaż wszystkie ({count})",
   "showLess": "Zwiń",
@@ -8422,7 +8311,7 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 ```json
 "boardGate": {
   "title": "{count, plural, =0 {No data on the km board} one {No data for # day} other {No data for # days}}",
-  "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed months. The claim can be accepted only once the data is complete; it can be rejected at any time.",
+  "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed weeks. The claim can be accepted only once the data is complete; it can be rejected at any time.",
   "datesLabel": "Days without mileage on the km board",
   "showAll": "Show all ({count})",
   "showLess": "Show less",
@@ -8442,12 +8331,12 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 
 #### §16.5.8 Acceptance checklist (2026-09-24, web-agent)
 
-- [ ] Период «все месяцы активны» у перевозчика и у staff **пиксельно как до изменения**: нет ноты, нет колонок tablicy, нет гейта.
+- [ ] Период «все недели активны» у перевозчика и у staff — без ноты, без колонок tablicy, без гейта.
 - [ ] Смешанный период определяется **только** по `mileageSource === 'board'`, не по строкам; без поля — `'declared'`.
 - [ ] Перевозчик: одна нота `mixedPeriodNotice`, **ни одного** числа км / дней в ней; `mileageEffective` не показывается нигде; stat-карточки превью не изменились; бейджи / приглушение / `—` §16.5.2 на месте.
 - [ ] `gapNotice` / `gapNoticeMonth` удалены из обоих `messages/*.json`, prop `mileage` удалён из `<BreakdownTable>` и всех трёх вызовов.
-- [ ] Staff: нота `boardNotice`, колонки «Km wg weryfikatora» / «Wpisane dni» справа от `Km/mc` с `border-l`; `off` → `—` (с `title`); `saturdaysOnly` → «X z Y sob.»; неполный месяц — янтарь + иконка + sr-only.
-- [ ] Staff-вариант переключает таблицу / карточки на **40rem** литеральными классами; в карточке `off`-месяца блока tablicy нет; итоговая плашка карточек — две строки.
+- [ ] Staff: нота `boardNotice`, колонки «Km wg weryfikatora» / «Wpisane dni» справа от `Km/tydz.` с `border-l`; `off` → `—` (с `title`); `saturdaysOnly` → «1 z 1 sob.»; неполная неделя — янтарь + иконка + sr-only.
+- [ ] Staff-вариант переключает таблицу / свёрнутые строки на **46rem** литеральными классами (§18.7.2); в раскрытии `off`-недели блока tablicy нет; итоговая плашка узкого вида — две строки.
 - [ ] `tfoot` staff: «Razem» | `kmGuaranteed` | `boardSettlement.mileageEffective` (сходится с суммой колонки) | пусто.
 - [ ] `ZAAKCEPTOWANO` **удалено** из опций при `boardIncomplete` (тем же фильтром, что `metGuarantee`), устаревший выбор сброшен; `REKLAMACJA_ZAAKCEPTOWANO`, `ODRZUCONO` и «Zapisz weryfikację» не затронуты.
 - [ ] `<BoardGapNotice>` внутри `<DecisionPanel>` первым элементом, в view и edit; не рендерится при `metGuarantee`, `inTransitGated`, reklamacji и вне `NA_WERYFIKACJI` / `OCZEKUJE_NA_AUTORYZACJE`; opiekun её видит.
@@ -8474,7 +8363,7 @@ boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 
 #### §16.5.10 Niedojazd в блоке DOPŁATA (`ClaimModal`, staff) (NEW 2026-09-24)
 
-**Проблема.** В модалке есть гарантия (`Km/mc`, «Razem»), км tablicy, сумма dopłaty и `<RecalcBadge>`, но нигде прямо не сказано «pojazd przejechał o 2 180 km mniej, niż gwarantowano». `kmDifference` модалка не выводит вообще (живое значение кормит только гейт `metGuarantee`). Pracownik вынужден вычитать в уме, а это ровно то число, за которое платят.
+**Проблема.** В модалке есть гарантия (`Km/tydz.`, «Razem»), км tablicy, сумма dopłaty и `<RecalcBadge>`, но нигде прямо не сказано «pojazd przejechał o 2 180 km mniej, niż gwarantowano». `kmDifference` модалка не выводит вообще (живое значение кормит только гейт `metGuarantee`). Pracownik вынужден вычитать в уме, а это ровно то число, за которое платят.
 
 **Размещение (locked): две строки прямо под полем dopłaty, над `<FormDescription>` «wyliczana automatycznie».** Порядок чтения блока: *сумма → почему такая сумма → она автоматическая*.
 
@@ -8483,7 +8372,7 @@ DOPŁATA GWARANCYJNA                          [RecalcBadge] [Przelicz wg aktualn
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 1 090,00 €                                                           [Lock] │
 └─────────────────────────────────────────────────────────────────────────────┘
-W miesiącach z gwarancją pojazd przejechał o 2 180 km mniej, niż gwarantowano.   ← text-sm text-text, «2 180 km mniej» — font-semibold
+W tygodniach z gwarancją pojazd przejechał o 2 180 km mniej, niż gwarantowano.   ← text-sm text-text, «2 180 km mniej» — font-semibold
 Niedojazd: 7 630 km gwarant. − 5 450 km wg weryfikatora = 2 180 km × 0,50 €/km   ← text-xs text-text-sub tabular-nums
 [Lock] wyliczana automatycznie
 ```
@@ -8528,22 +8417,22 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 - «Gwarancja wyjeżdżona» — тот же термин, что у `guaranteeMetHint` в Decyzji; фразы не противоречат друг другу.
 - Тон: строка niedojazdu — `text-sm text-text`, выделение `<b>` → `font-semibold tabular-nums`; строки «wyjeżdżona» — `text-sm text-text-sub`. **Без семантического цвета и без иконки** (правило §16.6: сумма к выплате — не «плохо», её отсутствие — не «хорошо»).
 - Без `aria-live`: строка пересчитывается на каждую правку, живой регион болтал бы на каждый символ. Об изменении суммы уже сообщает `<RecalcBadge>`.
-- Формула **без** «= {dopłata}» в конце: сумма стоит строкой выше в поле, а повтор с округлением `round2` мог бы разойтись на цент с эффективной ставкой многомесячного периода.
+- Формула **без** «= {dopłata}» в конце: сумма стоит строкой выше в поле, а повтор с округлением `round2` мог бы разойтись на цент с эффективной ставкой многонедельного периода.
 
-**Формулировки по периоду.** `scope = 'board'` (смешанный): «W miesiącach z gwarancją pojazd przejechał …» и «km wg weryfikatora» — понятно, что сравнивались только активные месяцы и только km tablicy (`driven` = итог колонки «Km wg weryfikatora»). `scope = 'declared'` (все активны): «Pojazd przejechał …» и «km przebiegu» — это поле «Przebieg / km zrealizowane» после правок pracownika. `km gwarant.` — тот же сокращённый термин, что «Razem (km gwarant.)».
+**Формулировки по периоду.** `scope = 'board'` (смешанный): «W tygodniach z gwarancją pojazd przejechał …» и «km wg weryfikatora» — понятно, что сравнивались только активные недели и только km tablicy (`driven` = итог колонки «Km wg weryfikatora»). `scope = 'declared'` (все активны): «Pojazd przejechał …» и «km przebiegu» — это поле «Przebieg / km zrealizowane» после правок pracownika. `km gwarant.` — тот же сокращённый термин, что «Razem (km gwarant.)».
 
-**Форматирование.** Параметры — предформатированные строки (как во всём `BreakdownTable`): `km` / `guaranteed` / `driven` — `Intl.NumberFormat('pl-PL', { maximumFractionDigits: 2 })` (`mileageEffective` бывает с копейками — `333,33`; `formatInt` дал бы видимое расхождение с суммой); `rate` — `{ minimumFractionDigits: 2, maximumFractionDigits: 4 }` (эффективная ставка многомесячного периода может быть не круглой). Разность `kmGuaranteed − kmDifference` в JS считается с плавающей ошибкой — форматтер с `maximumFractionDigits: 2` её убирает.
+**Форматирование.** Параметры — предформатированные строки (как во всём `BreakdownTable`): `km` / `guaranteed` / `driven` — `Intl.NumberFormat('pl-PL', { maximumFractionDigits: 2 })` (`mileageEffective` бывает с копейками — `333,33`; `formatInt` дал бы видимое расхождение с суммой); `rate` — `{ minimumFractionDigits: 2, maximumFractionDigits: 4 }` (эффективная ставка многонедельного периода может быть не круглой). Разность `kmGuaranteed − kmDifference` в JS считается с плавающей ошибкой — форматтер с `maximumFractionDigits: 2` её убирает.
 
 **Термины: «Niedojazd» у staff vs «Różnica km» у перевозчика — расхождение намеренное.** Карточка перевозчика — это знаковое сырое число (может быть отрицательным), и слово «niedojazd» рядом с «−500» было бы бессмыслицей. Staff получает фразу, в которой знак заменён словами «mniej» / «więcej», поэтому здесь можно назвать вещь её рабочим именем. Карточку перевозчика не трогаем.
 
-**i18n — `messages/pl.json` → `employee.claims.modal.shortfall`** (новый объект):
+**i18n — `messages/pl.json` → `employee.claims.modal.shortfall`** (новый объект; **2026-10-29:** «W miesiącach» → «W tygodniach»):
 
 ```json
 "shortfall": {
-  "line": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
+  "line": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
   "formula": "Niedojazd: {guaranteed} km gwarant. − {driven} {scope, select, board {km wg weryfikatora} other {km przebiegu}} = {km} km × {rate} €/km",
-  "metEqual": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
-  "metOver": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
+  "metEqual": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
+  "metOver": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
 }
 ```
 
@@ -8551,10 +8440,10 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 ```json
 "shortfall": {
-  "line": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
+  "line": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
   "formula": "Shortfall: {guaranteed} guaranteed km − {driven} {scope, select, board {km per verifier} other {km driven}} = {km} km × {rate} €/km",
-  "metEqual": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
-  "metOver": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
+  "metEqual": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
+  "metOver": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
 }
 ```
 
@@ -8566,7 +8455,7 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 - [ ] Все числа строки и сумма в поле берутся из **одного** объекта `src` (решённый смешанный → claim; иначе `previewQ.data ?? claim`). На скриншоте в `edit` после правки км: `niedojazd × stawka` = сумма в поле.
 - [ ] До ответа превью / во время пересчёта / при ошибке строка ведёт себя ровно как поле: без скелетона, без «—», без приглушения.
 - [ ] `kmDifference > 0` → фраза + формула; `= 0` → `metEqual`; `< 0` → `metOver` с модулем; **отрицательное число нигде не выводится**; `kmGuaranteed === 0` → строк нет.
-- [ ] Смешанный период (`src.breakdown.mileageSource === 'board'`) → «W miesiącach z gwarancją…» и «km wg weryfikatora»; в примере 7 630 − 5 450 = 2 180 km × 0,50 €/km при dopłacie 1 090,00 €; `driven` совпадает с итогом колонки «Km wg weryfikatora», когда превью и сохранённая пара считаны с одних входов.
+- [ ] Смешанный период (`src.breakdown.mileageSource === 'board'`) → «W tygodniach z gwarancją…» и «km wg weryfikatora»; в примере 7 630 − 5 450 = 2 180 km × 0,50 €/km при dopłacie 1 090,00 €; `driven` совпадает с итогом колонки «Km wg weryfikatora», когда превью и сохранённая пара считаны с одних входов.
 - [ ] Км — до 2 знаков после запятой, ставка — 2–4 знака; без семантического цвета, без иконки, без `aria-live`.
 - [ ] У перевозчика **ничего не изменилось**: `<LivePreviewPanel>` и страница wniosku — пиксельно как раньше.
 - [ ] **0 новых токенов, 0 новых примитивов, 0 правок API.**
@@ -8585,21 +8474,7 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 | Контекст рядом | статичная строка в том же блоке `text-xs text-text-sub`: `recalc.snapshotNote` — «Kwoty wyliczono wg limitów z dnia złożenia wniosku (12.02.2026).» Без неё кнопка необъяснима |
 | Отличие от `<RecalcBadge>` | бейдж — живой дебаунс-пересчёт по правкам фактов; кнопка — подтягивание **другого набора лимитов**. Их видно одновременно, они не конфликтуют |
 
-**`<RecalcLimitsDialog>`** — небольшой `<Dialog max-w-md>` (не `<ConfirmDialog>`: тому можно передать только строку, а нам нужна таблица «было → станет»).
-
-```
-┌ Przelicz wg aktualnych limitów ──────────────────────┐
-│ Porównaj kwoty wyliczone przy złożeniu wniosku       │
-│ z kwotami wg aktualnych limitów.                     │
-│                                                      │
-│                  Wniosek (obecnie)   Wg aktualnych   │
-│  Km gwarantowane      9 000      →        5 500      │
-│  Dopłata           1 750,00 €    →      950,00 €     │
-│                                Różnica: −800,00 €    │
-│                                                      │
-│              [ Anuluj ]  [ Zastosuj nowe kwoty ]     │
-└──────────────────────────────────────────────────────┘
-```
+**`<RecalcLimitsDialog>`** — `<Dialog>` (не `<ConfirmDialog>`: тому можно передать только строку, а нам нужна таблица «было → станет»). **2026-10-29:** `max-w-lg` (было `max-w-md`), под итогами — список изменённых недель wniosku; макет и правила — **§18.8**. Таблица ниже описывает итоговые строки и состояния диалога и остаётся в силе.
 
 | Слот | Оформление |
 |---|---|
@@ -8615,151 +8490,31 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 ### §16.7 — i18n-контракт (PL default + EN) — готово к вставке
 
-**`messages/pl.json` → `limits`** (добавить к существующему объекту):
+**`limits.*` — SUPERSEDED by §18.9 (2026-10-29).** Полный расклад ключей страницы лимитов (без изменений / удаляются / изменённые и новые, PL + EN) — в §18.9. Прежние месячные блоки JSON здесь удалены, чтобы не было двух источников.
 
-```json
-"toggleDay": "Gwarancja km/dzień — {month}",
-"toggleSaturday": "Gwarancja km/sobota — {month}",
-"stateDefault": "domyślne: {kmPerDay} km/dz. · {rate} €/km",
-"stateDisabled": "gwarancja wyłączona (0 km)",
-"unsaved": "Nie zapisano — obowiązuje 0 km",
-"unsavedHint": "Wpisz wartość, aby włączyć gwarancję. Puste pole = miesiąc pozostaje wyłączony.",
-"unsavedRevertedSr": "Gwarancja pozostaje wyłączona",
-"disabledRateHint": "Stawka zachowana — zostanie użyta po ponownym włączeniu gwarancji.",
-"independenceHint": "Gwarancja dzienna i sobotnia są niezależne — miesiąc może mieć włączone tylko soboty.",
-"defaultsNotice": "{count, plural, one {# miesiąc nie ma konfiguracji} few {# miesiące nie mają konfiguracji} many {# miesięcy nie ma konfiguracji} other {# miesięcy nie ma konfiguracji}} — obowiązuje wartość domyślna: {kmPerDay} km/dzień i {rate} €/km.",
-"placeholderDefault": "{value} (domyślnie)",
-"placeholderNoChange": "bez zmian",
-"bulk": {
-  "trigger": "Zastosuj do wielu miesięcy",
-  "title": "Zastosuj limity do wielu miesięcy",
-  "description": "Zmiany dotyczą tylko roku {year}. Pola pozostawione jako „bez zmian” nie nadpisują istniejących wartości.",
-  "rangeLegend": "Zakres",
-  "rangeAll": "Cały rok {year}",
-  "rangeFromTo": "Od – do",
-  "rangeCustom": "Wybrane miesiące",
-  "from": "Od",
-  "to": "Do",
-  "monthsPlaceholder": "Wybierz miesiące",
-  "monthsSearchPlaceholder": "Szukaj miesiąca",
-  "monthsEmpty": "Brak wyników",
-  "valuesLegend": "Wartości",
-  "actionNoChange": "Bez zmian",
-  "actionSet": "Włącz i ustaw wartość",
-  "actionDisable": "Wyłącz (0 km)",
-  "kmPerDayAction": "Km / dzień",
-  "kmPerSaturdayAction": "Km / sobota",
-  "ratePerKm": "Stawka € / km",
-  "rateHint": "Puste pole = bez zmian. Stawka jest zachowywana również przy wyłączeniu gwarancji.",
-  "errorValueRequired": "Podaj wartość albo wybierz „Bez zmian” lub „Wyłącz (0 km)”.",
-  "errorNoMonths": "Wybierz co najmniej jeden miesiąc.",
-  "errorNoChanges": "Nie wybrano żadnej zmiany.",
-  "summaryLegend": "Podsumowanie",
-  "summaryHeadline": "Zmienisz {changed} z {total} miesięcy roku {year}.",
-  "summaryOverwrite": "{count, plural, one {# miesiąc ma już ustawione wartości — zostanie nadpisany} few {# miesiące mają już ustawione wartości — zostaną nadpisane} many {# miesięcy ma już ustawione wartości — zostaną nadpisane} other {# miesięcy ma już ustawione wartości — zostaną nadpisane}}.",
-  "summaryNoop": "{count, plural, one {# miesiąc bez zmian} few {# miesiące bez zmian} many {# miesięcy bez zmian} other {# miesięcy bez zmian}}.",
-  "summaryIrreversible": "Operacji nie można cofnąć. Poprzednie wartości pozostaną widoczne w audycie.",
-  "colMonth": "Miesiąc",
-  "colCurrent": "Obecnie",
-  "colNew": "Po zmianie",
-  "arrowSr": "zmiana na",
-  "valueNone": "brak (domyślne)",
-  "valueDisabled": "wyłączone",
-  "valueNoChange": "bez zmian",
-  "apply": "{count, plural, one {Zastosuj do # miesiąca} few {Zastosuj do # miesięcy} many {Zastosuj do # miesięcy} other {Zastosuj do # miesięcy}}",
-  "applying": "Zapisywanie…",
-  "successToast": "{count, plural, one {Zaktualizowano # miesiąc} few {Zaktualizowano # miesiące} many {Zaktualizowano # miesięcy} other {Zaktualizowano # miesięcy}}",
-  "partialError": "{count, plural, one {Nie zapisano # miesiąca} few {Nie zapisano # miesięcy} many {Nie zapisano # miesięcy} other {Nie zapisano # miesięcy}} — spróbuj ponownie.",
-  "retryFailed": "Ponów nieudane",
-  "rowOk": "Zapisano",
-  "rowFailed": "Błąd zapisu"
-}
-```
-
-**`messages/en.json` → `limits`:**
-
-```json
-"toggleDay": "Daily km guarantee — {month}",
-"toggleSaturday": "Saturday km guarantee — {month}",
-"stateDefault": "default: {kmPerDay} km/day · {rate} €/km",
-"stateDisabled": "guarantee disabled (0 km)",
-"unsaved": "Not saved — 0 km applies",
-"unsavedHint": "Enter a value to enable the guarantee. An empty field means the month stays disabled.",
-"unsavedRevertedSr": "The guarantee stays disabled",
-"disabledRateHint": "Rate kept — it will be used again when the guarantee is re-enabled.",
-"independenceHint": "The daily and Saturday guarantees are independent — a month can have Saturdays only.",
-"defaultsNotice": "{count, plural, one {# month has no configuration} other {# months have no configuration}} — the default applies: {kmPerDay} km/day and {rate} €/km.",
-"placeholderDefault": "{value} (default)",
-"placeholderNoChange": "no change",
-"bulk": {
-  "trigger": "Apply to several months",
-  "title": "Apply limits to several months",
-  "description": "Changes affect {year} only. Fields left as “no change” do not overwrite existing values.",
-  "rangeLegend": "Range",
-  "rangeAll": "Whole year {year}",
-  "rangeFromTo": "From – to",
-  "rangeCustom": "Selected months",
-  "from": "From",
-  "to": "To",
-  "monthsPlaceholder": "Select months",
-  "monthsSearchPlaceholder": "Search month",
-  "monthsEmpty": "No results",
-  "valuesLegend": "Values",
-  "actionNoChange": "No change",
-  "actionSet": "Enable and set a value",
-  "actionDisable": "Disable (0 km)",
-  "kmPerDayAction": "Km / day",
-  "kmPerSaturdayAction": "Km / Saturday",
-  "ratePerKm": "Rate € / km",
-  "rateHint": "Empty field = no change. The rate is kept even when the guarantee is disabled.",
-  "errorValueRequired": "Enter a value, or choose “No change” or “Disable (0 km)”.",
-  "errorNoMonths": "Select at least one month.",
-  "errorNoChanges": "No change selected.",
-  "summaryLegend": "Summary",
-  "summaryHeadline": "You are changing {changed} of {total} months in {year}.",
-  "summaryOverwrite": "{count, plural, one {# month already has values — it will be overwritten} other {# months already have values — they will be overwritten}}.",
-  "summaryNoop": "{count, plural, one {# month unchanged} other {# months unchanged}}.",
-  "summaryIrreversible": "This cannot be undone. Previous values remain visible in the audit log.",
-  "colMonth": "Month",
-  "colCurrent": "Current",
-  "colNew": "After the change",
-  "arrowSr": "changes to",
-  "valueNone": "none (default)",
-  "valueDisabled": "disabled",
-  "valueNoChange": "no change",
-  "apply": "{count, plural, one {Apply to # month} other {Apply to # months}}",
-  "applying": "Saving…",
-  "successToast": "{count, plural, one {# month updated} other {# months updated}}",
-  "partialError": "{count, plural, one {# month not saved} other {# months not saved}} — please try again.",
-  "retryFailed": "Retry failed months",
-  "rowOk": "Saved",
-  "rowFailed": "Save failed"
-}
-```
-
-**`messages/pl.json` → `carrier.breakdown`** (добавить):
+**`messages/pl.json` → `carrier.breakdown`** (добавить; **2026-10-29:** тексты по неделям):
 
 ```json
 "guaranteeDisabled": "Gwarancja wyłączona",
-"guaranteeSaturdayOnly": "Gwarancja tylko w soboty",
-"rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym miesiącu",
+"guaranteeSaturdayOnly": "Tylko sobota",
+"rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym tygodniu",
 "allDisabledTitle": "Brak gwarancji w tym okresie",
-"allDisabledBody": "Dla wszystkich miesięcy tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
+"allDisabledBody": "Dla wszystkich tygodni tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
 ```
 
 **`messages/en.json` → `carrier.breakdown`:**
 
 ```json
 "guaranteeDisabled": "Guarantee disabled",
-"guaranteeSaturdayOnly": "Saturdays only",
-"rateNoneTitle": "No rate — the guarantee is disabled for this month",
+"guaranteeSaturdayOnly": "Saturday only",
+"rateNoneTitle": "No rate — the guarantee is disabled for this week",
 "allDisabledTitle": "No guarantee in this period",
-"allDisabledBody": "The mileage guarantee is disabled for every month of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
+"allDisabledBody": "The mileage guarantee is disabled for every week of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
 ```
 
 > **2026-09-24:** `gapNotice` / `gapNoticeMonth` удалены из обоих языков. Ключи смешанного периода (`mixedPeriodNotice`, `boardNotice`), staff-колонок tablicy km и `employee.claims.modal.boardGate` — **§16.5.7** (единственный источник, здесь не дублируются).
 
-**`messages/pl.json` → `employee.claims.modal.recalc`** (новый объект):
+**`messages/pl.json` → `employee.claims.modal.recalc`** (новый объект; в коде объект называется **`recalcLimits`** — имя `recalc` занято живым бейджем пересчёта. **2026-10-29:** ключи списка изменённых недель — §18.9):
 
 ```json
 "recalc": {
@@ -8807,12 +8562,14 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 ### §16.8 — Компоненты / файлы / токены (сводка для web-agent)
 
+> **2026-10-29:** страница лимитов и разбивка по неделям — сводка **§18.13** (`<LimitsRow>` и `<BulkLimitsDialog>` удаляются, `<LimitsView>` переписывается, порог staff-разбивки 46rem). Строки ниже про них — история 2026-09-20; остальные строки в силе.
+
 | Изменение | Где | Тип |
 |---|---|---|
-| `<LimitsRow>` — два чекбокса в ячейках, три состояния строки, состояние `unsaved`, память прежнего значения | `apps/web/components/limits/LimitsRow.tsx` | правка |
-| `<LimitsView>` — кнопка «Zastosuj do wielu miesięcy», страничная нота `defaultsNotice`, подсказка `independenceHint` | `apps/web/app/(employee)/employee/(admin)/limits/LimitsView.tsx` | правка |
-| `<BulkLimitsDialog>` — `<FormDialog>` + `<Select>` + `<MultiSelect>` + сводная таблица | `apps/web/components/limits/BulkLimitsDialog.tsx` | **новый** (композиция) |
-| `<BreakdownTable>` — бейджи `disabled` / `saturdayOnly`, `—` вместо ставки-призрака, пустое состояние всего периода; **2026-09-24:** prop `boardSettlement?`, prop `mileage` удалён, staff-колонки tablicy km + порог 40rem (§16.5.5) | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
+| ~~`<LimitsRow>` — два чекбокса в ячейках, три состояния строки, состояние `unsaved`, память прежнего значения~~ → §18.13 | `apps/web/components/limits/LimitsRow.tsx` | удалить (§18) |
+| ~~`<LimitsView>` — кнопка «Zastosuj do wielu miesięcy», страничная нота `defaultsNotice`, подсказка `independenceHint`~~ → §18.13 | `apps/web/app/(employee)/employee/(admin)/limits/LimitsView.tsx` | переписать (§18) |
+| ~~`<BulkLimitsDialog>` — `<FormDialog>` + `<Select>` + `<MultiSelect>` + сводная таблица~~ → §18.6 | `apps/web/components/limits/BulkLimitsDialog.tsx` | удалить (§18) |
+| `<BreakdownTable>` — бейджи `disabled` / `saturdayOnly`, `—` вместо ставки-призрака, пустое состояние всего периода; **2026-09-24:** prop `boardSettlement?`, prop `mileage` удалён, staff-колонки tablicy km (§16.5.5); **2026-10-29:** строки по неделям, пороги 36 / 46rem (§18.7) | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
 | `<GuaranteeGapNotice audience>` — нота смешанного периода; **2026-09-24:** условие `mileageSource === 'board'`, тексты `mixedPeriodNotice` / `boardNotice` (§16.5.3) | в `BreakdownTable.tsx` | правка |
 | `analyzeBreakdown` — **2026-09-24:** смешанный период = `mileageSource === 'board'`; поля `daysActive` / `daysTotal` / `mileageEffective` / `mileage` из `BreakdownGuaranteeInfo` больше не нужны UI | `apps/web/lib/claims/breakdownGuarantee.ts` (+ тест) | правка |
 | **2026-09-24:** `<BoardGapNotice>` в `<DecisionPanel>`, гейт `ZAAKCEPTOWANO` по `boardSettlement.complete`, 422 `CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED` (§16.5.6) | `apps/web/components/claims/ClaimModal.tsx` | правка |
@@ -8822,32 +8579,28 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 **Токены: 0 новых.** Используются существующие `bg-card`, `bg-input`, `bg-input/40`, `bg-warning/5`, `border-warning`, `text-warning-dark` / `dark:text-warning`, `text-text`, `text-text-sub`, `border-border`, `border-brand/60`, `bg-brand-50/40`, `text-success`, `text-danger`. **0 правок** `tailwind.config.ts` / `globals.css`.
 
-**Иконки (Lucide):** `Info`, `CalendarRange`, `CalendarOff`, `ArrowRight`, `RefreshCw`, `Check`, `X`; **2026-09-24:** `CalendarX` (плашка «brak danych»), `AlertTriangle` (неполный месяц в колонке «Wpisane dni»). Эмодзи — нет. Токены для §16.5.5–16.5.6 — существующие `bg-warning-bg`, `dark:bg-warning/15`, `border-warning/40`, `text-warning-dark`, `dark:text-warning` (та же поверхность, что `progExceededHint`).
+**Иконки (Lucide):** `Info`, `CalendarRange`, `CalendarOff`, `ArrowRight`, `RefreshCw`, `Check`, `X`; **2026-09-24:** `CalendarX` (плашка «brak danych»), `AlertTriangle` (неполная неделя в колонке «Wpisane dni»). Эмодзи — нет. Токены для §16.5.5–16.5.6 — существующие `bg-warning-bg`, `dark:bg-warning/15`, `border-warning/40`, `text-warning-dark`, `dark:text-warning` (та же поверхность, что `progExceededHint`).
 
 ### §16.9 — Acceptance checklist (§16, web-agent)
 
-- [ ] **Три состояния различимы одним взглядом.** Скриншот года, где есть все три, читается без наведения: A — под-строка «domyślne: …» янтарным + `placeholder="540 (domyślnie)"`; B — `bg-input/40` строка + «gwarancja wyłączona (0 km)»; C — обычная строка без под-строки.
+> **2026-10-29:** пункты про раскладку страницы лимитов, галки в ячейках и `<BulkLimitsDialog>` удалены — их место заняли пункты §18.14. Ниже — то, что проверяется и после перехода на недели.
+
 - [ ] **Инвариант «снятая галка ⟺ 0 ⟺ ноль км»** соблюдён во всех трёх состояниях; при `NULL` галка **стоит**.
-- [ ] Пустая ячейка **нигде** не является единственным сигналом fallback-а; страничная нота `defaultsNotice` появляется при `count > 0`.
-- [ ] **`line-through` отсутствует** во всей таблице лимитов и в breakdown.
-- [ ] Оба чекбокса — **внутри своих ячеек**, ни одного чекбокса в первой колонке и ни одного в `<th>`; хит-область 36×36 (`h-9 w-9`), `aria-label` содержит месяц.
-- [ ] Выключение месяца **не** трогает субботу и наоборот; `independenceHint` отрендерен.
+- [ ] Пустое поле **нигде** не является единственным сигналом fallback-а; страничная нота `defaultsNotice` появляется при `count > 0`.
+- [ ] **`line-through` отсутствует** во всём UI лимитов и в breakdown.
+- [ ] Выключение дневной гарантии **не** трогает субботу и наоборот; `independenceHint` отрендерен.
 - [ ] Снятие галки пишет `0` немедленно; установка галки **не отправляет ни одного запроса**; состояние `unsaved` показывает «Nie zapisano — obowiązuje 0 km» и `aria-describedby`.
 - [ ] Blur пустого поля при стоящей галке возвращает галку в снятое положение + sr-объявление; повторная установка в том же сеансе предзаполняет прежнее значение как черновик.
 - [ ] **Ни один путь UI не отправляет `NULL`** в `kmPerDay` / `kmPerSaturday`.
-- [ ] Ставка в выключенном месяце **сохраняется, остаётся редактируемой**, имеет `title` с объяснением.
-- [ ] `<BulkLimitsDialog>`: три режима диапазона; для km — `<Select>` из трёх опций (не чекбокс); пустая ставка = «bez zmian»; «Włącz i ustaw» без значения блокирует сабмит.
-- [ ] Сводка массовой операции показывает **пер-месячные «Obecnie → Po zmianie»**, счётчик перезаписываемых месяцев и строку необратимости; в «Obecnie» никогда нет пустой ячейки.
-- [ ] Кнопка применения **называет число месяцев**; второго вложенного диалога подтверждения нет.
-- [ ] Частичный отказ оставляет диалог открытым с пер-строчным результатом и «Ponów nieudane» (либо, при атомарном bulk-эндпоинте, простым success/error).
-- [ ] Выключенный месяц у перевозчика: бейдж «Gwarancja wyłączona», приглушённая строка, `Km/mc` без `font-semibold`.
-- [ ] **Ставка-призрак спрятана везде**, где `kmGuaranteed === 0` (breakdown per-month и footer, stat-карточки, `ClaimModal`) — рендерится `—`, `0,50` не появляется ни в одном месте.
+- [ ] Ставка в выключенной неделе **сохраняется, остаётся редактируемой**, имеет `title` с объяснением.
+- [ ] Выключенная неделя у перевозчика: бейдж «Gwarancja wyłączona», приглушённая строка, `Km/tydz.` без `font-semibold`.
+- [ ] **Ставка-призрак спрятана везде**, где `kmGuaranteed === 0` (breakdown по неделям и footer, stat-карточки, `ClaimModal`) — рендерится `—`, `0,50` не появляется ни в одном месте.
 - [ ] `<GuaranteeGapNotice>` появляется только при `mileageSource === 'board'`, стоит **над** таблицей, нейтрального тона, без чисел; текст по аудитории — §16.5.3 (REWRITTEN 2026-09-24). Остальной checklist смешанного периода — §16.5.8.
 - [ ] Период целиком без гарантии → `<EmptyState>` с `<CalendarOff />` вместо таблицы; футер «Razem» и блок граничных дней скрыты; ноты смешанного периода нет.
 - [ ] Кнопка «Przelicz wg aktualnych limitów» — `variant="outline"` в блоке DOPŁATA, **не** в футере; отсутствует (не дизейблится) для ролей вне `admin`/`pracownik` и на решённых wniosek-ах; рядом стоит `snapshotNote`.
 - [ ] `<RecalcLimitsDialog>` показывает «было → станет» до записи; дельта **без семантического цвета**; вариант «Limity nie zmieniły się» схлопывает футер в «Zamknij»; ошибка оставляет диалог открытым.
 - [ ] Dark mode: все новые поверхности (`bg-input/40`, `bg-warning/5`, бейджи, нота) проверены в обеих темах; контраст AA (`text-warning-dark` на `bg-card` в light, `text-warning` на `bg-card` в dark).
-- [ ] Клавиатура: чекбокс → инпут → следующий чекбокс в естественном порядке табуляции; Esc в `unsaved`-ячейке отменяет черновик; фокус после закрытия диалогов возвращается на триггер.
+- [ ] Клавиатура: Esc в `unsaved`-поле отменяет черновик; фокус после закрытия диалогов возвращается на триггер. Остальной клавиатурный контракт страницы лимитов — §18.5.3.
 - [ ] **0 новых токенов, 0 новых примитивов, 0 правок `tailwind.config.ts` / `globals.css`.**
 
 ---
@@ -9832,6 +9585,506 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 | W17 | `UsersListView` (опц. из §17.7) | Вторая строка «↳ {лидер}» сделана Lucide `CornerDownRight` (`aria-hidden`) + `sr-only` «Przełożony (lider):» вместо глифа «↳» | Скринридер читал бы «↳» как «стрелка вниз-вправо» |
 | W18 | Счётчик / очередь решающего | Запрос `scope=decide&status=pending` идёт с `meta: SUPPRESS_GLOBAL_ERROR` | У pill нет своего error-UI: лидер, у которого только что сняли флаг (U10), получил бы 403-тост на каждой странице; страница входящих показывает inline error state того же запроса |
 | W19 | `<LockNotice>` (§6.5.13, общий примитив) | Корень `<div role="note">` вместо `<p>`, обёртка текста `<div className="min-w-0">` вместо `<span>`; вид не меняется | `ApproveTransferDialog` кладёт внутрь `<ul>` — `<ul>` в `<p>` невалиден и давал hydration error в консоли (найдено в браузерной проверке 2026-09-28). Все вызовы стоят в блочных контейнерах |
+
+---
+
+## §18 — Limity tygodniowe: kalendarz roku, edycja tygodnia, rozbicie po tygodniach (NEW 2026-10-29 — AUTHORITATIVE)
+
+> **Scope.** С 2026-10-29 лимиты задаются **по неделям ISO** (бизнес-правило — [01-overview.md](01-overview.md)): неделя пн–вс, номера 1–52/53, неделя принадлежит году (и месяцу) своего четверга, ключ `YYYY-Www`. У каждой недели три значения — `kmPerDay` (пн–пт), `kmPerSaturday` (суббота этой недели), `ratePerKm`, — и у каждого три состояния `NULL` / `0` / `> 0`.
+>
+> **Что заменяет.** Месячную страницу `/employee/limits` (§`<LimitsRow>`, §16.1 — раскладка строки, §16.2, §16.4), месячные строки разбивки (§`<BreakdownTable>`, §16.5.2 — карточки, §16.5.5 — раскладка и пороги), содержимое диалога §16.6 и i18n §16.7 для `limits.*`. **Остаётся в силе** (с заменой «месяц» → «неделя»): правила трёх состояний §16.1, механика галок §16.3, правило ставки-призрака §16.5.2, смешанный период, пустое состояние, гейт акцепта и niedojazd (§16.5.1, §16.5.3, §16.5.4, §16.5.6, §16.5.10), размещение кнопки пересчёта §16.6.
+>
+> Дизайн утверждён владельцем 2026-10-29 целиком. **0 новых токенов, 0 новых примитивов, 0 правок `globals.css`.**
+
+### §18.0 — Решения (прочитать первым)
+
+| # | Решение |
+|---|---|
+| D1 | Главный вид страницы лимитов — **«Kalendarz roku»**: 12 строк-месяцев × плитки недель + закреплённая справа **панель редактирования**. Неделя стоит в строке месяца своего четверга. Весь год — за один короткий скролл. (Таблица на 53 строки с полосами месяцев рассматривалась и отклонена: нет обзора года, массовая правка снова требует отдельного диалога.) |
+| D2 | **Плитка только показывает, редактирует панель.** Три инпута с галками в плитке шириной ~130 px не помещаются, и не остаётся места на ошибку и `unsaved` |
+| D3 | **Одна неделя — автосохранение** (как ячейка раньше). **N > 1 недель — только явной кнопкой «Zastosuj do N tygodni»** с предпросмотром «было → станет» прямо в плитках. Отдельного диалога массового применения больше нет: выделение + та же панель |
+| D4 | **NULL никогда не выглядит пустым**: не настроенное значение — `540 dom.` янтарём, выключенное — `wył.`, суббота без гарантии — `—`. Сокращение «dom.» утверждено |
+| D5 | Перевозчик видит **номер недели**: «Tydz. 23 · 03.06–07.06» (номер помогает в разговоре с opiekunem) |
+| D6 | `<RecalcLimitsDialog>` показывает **изменённые недели** и какие значения лимита в них сдвинулись (api даёт пер-недельный dry run) |
+| D7 | **Прошедшие недели редактируемы** (исправления задним числом); панель предупреждает, что поданные wnioski сами не пересчитываются. Прошлое **не** приглушается |
+| D8 | Суббота в разбивке — **своя колонка «Sob.»** вместо подстроки «Soboty n × km» |
+
+### §18.1 — Страница лимитов: раскладка
+
+```
+Limity gwarancji km                                    [‹]  2026  [›]   [Bieżący tydzień]
+Tygodnie ISO (pn–nd). Tydzień należy do miesiąca i roku, w którym wypada jego czwartek.
+53 tygodnie · 29.12.2025 – 03.01.2027
+
+ⓘ 4 tygodnie nie mają konfiguracji — obowiązuje 540 km/dzień i 0,50 €/km.   [Zaznacz te tygodnie]
+
+┌ KALENDARZ ──────────────────────────────────────────────────────────┐ ┌ PANEL (sticky) ─────────┐
+│ I KWARTAŁ · tyg. 1–13                                   [Zaznacz]   │ │ Tydzień 44              │
+│                                                                     │ │ 26.10–01.11.2026        │
+│ STYCZEŃ    ┌1 29.12.2025–04.01┐┌2 05.01–11.01┐┌3 …┐┌4 …┐┌5 …┐       │ │ październik · bieżący   │
+│  km/dzień  │              540 ││         540 ││   ││   ││   │       │ │                         │
+│  sobota    │                — ││         300 ││   ││   ││   │       │ │ (форма недели, §18.5)   │
+│  €/km      │             0,50 ││        0,50 ││   ││   ││   │       │ │                         │
+│            └──────────────────┘└─────────────┘└───┘└───┘└───┘       │ │                         │
+│ LUTY       ┌6 …┐┌7 …┐┌8 …┐┌9 …┐                                     │ │                         │
+│ MARZEC     ┌10…┐┌11…┐┌12…┐┌13…┐                                     │ │                         │
+│ II KWARTAŁ · tyg. 14–26                                 [Zaznacz]   │ │                         │
+│ KWIECIEŃ   ┌14 30.03–05.04┐ …                                       │ │                         │
+│ …                                                                   │ │                         │
+│ IV KWARTAŁ · tyg. 40–53                                 [Zaznacz]   │ │                         │
+│ GRUDZIEŃ   ┌49┐┌50┐┌51┐┌52┐┌53 28.12–03.01.2027┐                    │ │                         │
+└─────────────────────────────────────────────────────────────────────┘ └─────────────────────────┘
+Gwarancja dzienna i sobotnia są niezależne — tydzień może mieć włączoną tylko sobotę.
+```
+
+| Слот | Решение |
+|---|---|
+| Шапка | `<h1>` `limits.title`; под ним `limits.isoHint` и `limits.yearSpan` (`text-sm text-text-sub`). Справа — `[‹] 2026 [›]` (ghost icon-кнопки, `aria-label` = `prevYear` / `nextYear`) и `ghost`-кнопка `limits.currentWeek` (§18.4) |
+| Нота fallback | `limits.defaultsNotice` между шапкой и календарём (§18.3) |
+| Раскладка ≥ 1280 px | `grid grid-cols-[minmax(0,1fr)_22rem] items-start gap-6`; панель `sticky top-4`. Уже — §18.10 |
+| Карточка календаря | оболочка таблиц: `rounded-xl border border-border bg-card shadow-card p-4` |
+| Строка квартала | `text-xs font-bold uppercase tracking-wider text-text-sub`, текст `limits.quarter` с номерами недель (IV kwartał 2026 — «tyg. 40–53»: W53 видна прямо в подписи) + `<Button variant="ghost" size="sm">` `selection.selectQuarter`. Между кварталами — `mt-3 border-t border-border pt-3` |
+| Строка месяца | `grid grid-cols-[7rem_repeat(5,minmax(0,1fr))] gap-2`. Первая колонка — `rowheader`: название месяца `text-sm font-bold uppercase` (кнопка: клик выделяет недели месяца, §18.6), под ним три подписи `limits.legend.*` `text-[11px] text-text-sub` |
+| Выравнивание подписей | название месяца и заголовок плитки — `h-5`; каждая подпись и каждая строка значения в плитке — `h-5 leading-5`. Подписи стоят на тех же базовых линиях, что и числа: «таблица из таблиц» без подписей в каждой плитке |
+| Месяц с 4 неделями | пятый слот пустой (плитки не растягиваются), колонки месяцев читаются столбиком |
+| Под календарём | `limits.independenceHint`, `text-xs text-text-sub` |
+| Загрузка (§8.1) | шапка, названия месяцев и подписи живые; каждая плитка — `<Skeleton className="rounded-lg">` высотой плитки; панель — в пустом состоянии |
+| Ошибка загрузки | `<EmptyState icon={AlertTriangle}>` внутри карточки календаря + повтор (паттерн §8.2). Пустого состояния у страницы нет: в году всегда 52/53 недели |
+
+### §18.2 — `<WeekTile>`: анатомия и состояния
+
+```
+ C · aktywny        A · domyślny       B · wyłączony      tylko sobota       bieżący + zaznaczony
+┌23 01.06–07.06┐   ┌24 08.06–14.06┐   ┌25 15.06–21.06┐   ┌26 22.06–28.06┐   ┏44 26.10–01.11┓
+│         540  │   │    540 dom.  │   │         wył. │   │         wył. │   ┃         540  ┃
+│         300  │   │           —  │   │           —  │   │         300  │   ┃           —  ┃
+│        0,50  │   │   0,50 dom.  │   │        0,50  │   │        0,50  │   ┃        0,50  ┃
+└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘   ┗━━━━━━━━━━━━━━┛
+ bg-card            янтарные значения  bg-input/40,        bg-card (платит)   brand-полоса сверху
+                    (только они)       text-text-sub                          = текущая; кольцо = выделена
+```
+
+| Элемент | Решение |
+|---|---|
+| Корень | `relative rounded-lg border border-border bg-card px-2.5 py-2 text-left cursor-pointer transition-colors hover:border-brand/40`; `role="gridcell"` (§18.5.3) |
+| Заголовок | номер недели `text-sm font-bold tabular-nums` + диапазон `DD.MM–DD.MM` `text-[11px] text-text-sub`. **День и месяц всегда с обеих сторон**, поэтому неделя через границу месяцев (`29.06–05.07`) читается сразу |
+| Год у дат | **только** у даты вне показанного года: `29.12.2025–04.01` (W01), `28.12–03.01.2027` (W53) |
+| Значения | три строки `h-5 leading-5`, правое выравнивание, `text-sm tabular-nums`. Порядок: km/dzień, sobota, €/km. Ставка — `pl-PL`, 2–4 знака после запятой |
+| Текущая неделя | `border-t-2 border-t-brand` (как подчёркивание «сегодня» на tablicy km, §7.7.3) + метка `currentBadge` в панели. Цвет бренда только на рамке: контраст UI ≥ 3:1 в обеих темах |
+| Выделена | рецепт нажатого KPI-кафеля §15.1: `border-brand/60 bg-brand-50/40 dark:bg-brand/10 ring-2 ring-brand/25` |
+| Фокус клавиатуры | `focus-visible:ring-[3px] focus-visible:ring-brand/25` |
+| Ожидает сохранения | `<Loader2 size={12} className="absolute right-1.5 top-1.5 animate-spin text-text-sub" aria-hidden />`, пока у недели есть записи в очереди |
+| Ошибка сохранения | `border-danger` до следующей успешной записи этой недели |
+| Предпросмотр массовой правки | §18.6.2 |
+| `aria-label` | полной фразой — `limits.tileAria` (§18.9) |
+
+**Прошедшие недели не приглушаются.** Приглушение (`bg-input/40`) занято состоянием «wyłączony». Если приглушить и прошлое, «выключено» и «прошло» сольются — ровно та путаница, против которой строилась §16. Прошлое отмечается только словами в панели (§18.5.1).
+
+### §18.3 — Три состояния и fallback: NULL и 0 не путаются
+
+Правило §16.1 сохраняется: **состояние A никогда не выражается пустотой.** Теперь оно действует **по каждому значению отдельно**, потому что fallback подставляется пополево.
+
+| Значение | NULL (A) | `0` (B) | `> 0` (C) |
+|---|---|---|---|
+| km/dzień | `540 dom.` янтарём | `wył.` (`text-text-sub`) | число |
+| €/km | `0,50 dom.` янтарём | `0,00` (у ставки нет «выкл.», это цена) | число |
+| sobota | `—` (NULL ≡ выкл., скрытого риска нет) | `—` | число |
+
+- **Янтарь (`text-warning-dark dark:text-warning`) — только у A и только на самом значении.** Заливки плитки нет: год без настроек иначе стал бы янтарной стеной.
+- **Приглушённая плитка (`bg-input/40`, значения `text-text-sub`) — только неделя, которая не платит ничего** (`kmPerDay = 0` и суббота выключена). «Tylko sobota» платит и не приглушается.
+- **Нота над календарём — одна на страницу**: существующий `<LockNotice icon={Info}>` с `limits.defaultsNotice`. Неделя «не настроена», если NULL у km/dzień **или** у ставки (раньше ставка NULL при заданных км выглядела пустым инпутом — это исправлено). Справа в ноте — `<Button variant="outline" size="sm">` `limits.defaultsSelect`: выделяет все такие недели, панель сразу в массовом режиме (правило §15.5: у числа есть «что за ним»).
+- **В панели** у NULL-поля: галка стоит, инпут пустой с плейсхолдером `limits.placeholderDefault` («540 (domyślnie)»), под ним янтарная строка `panel.notConfigured`.
+- **Без изменений:** ни один путь UI не пишет NULL; вернуть неделю в A нельзя; `line-through` запрещён.
+- **Значения после переноса месячных лимитов.** Суббота недели получила значение только там, где эта суббота была 1-й/3-й/5-й субботой своего месяца, иначе `0`. Поэтому сразу после переноса строка «sobota» в календаре чередует `300` и `—`. Это ожидаемо (выплаты равны прежнему месячному правилу), отдельной пометки и текста в UI нет.
+
+### §18.4 — Годы, W53, W01 в декабре
+
+- **«Год» страницы — год недель ISO.** Под заголовком всегда фактический диапазон дат (`limits.yearSpan`: «53 tygodnie · 29.12.2025 – 03.01.2027»). Так W53 и W01, начинающаяся в декабре, объяснены до того, как до них дошёл взгляд.
+- **W01 2026 (29.12.2025–04.01.2026)** — первая плитка января (четверг 1 января); дата из 2025 года печатается с годом.
+- **W53 2026 (28.12.2026–03.01.2027)** — пятая плитка декабря (четверг 31.12). В 52-недельном году её нет: в декабре 4 плитки, подпись IV квартала «tyg. 40–52».
+- **Навигация:** `[‹] 2026 [›]` + `ghost`-кнопка «Bieżący tydzień» — видна, если открыт другой год или текущая неделя вне зоны видимости; прокручивает к ней и выделяет. **URL — `?week=2026-W23`**, тот же формат, что у tablicy km (§7.7.5): ссылкой на неделю можно поделиться; год выводится из недели.
+- **Выделение не переходит через годы.** Смена года снимает выделение (как и раньше, правка в рамках одного года). Enter на последней неделе года не переключает год: фокус остаётся, скринридер объявляет `panel.lastWeekOfYear`.
+
+### §18.5 — Редактирование одной недели (`<WeekEditPanel>`, режим «tydzień»)
+
+#### §18.5.1 Панель
+
+```
+┌ Tydzień 23 · 01.06–07.06.2026 ──────────────── ✕ ┐
+│ czerwiec · II kwartał                            │
+│ ⓘ Tydzień już minął. Zmiana nie przelicza        │  ← только у прошлых недель
+│   złożonych wniosków (…„Przelicz wg aktualnych   │
+│   limitów” we wniosku).                          │
+│                                                  │
+│ KM / DZIEŃ (PN–PT)                               │
+│ [✓] Włączona  [ 540          ]                   │
+│                                                  │
+│ KM / SOBOTA (06.06)                              │
+│ [✓] Włączona  [ 300          ]                   │
+│                                                  │
+│ STAWKA € / KM                                    │
+│               [ 0,50         ]                   │
+│                                                  │
+│ Maks. w tygodniu (bez świąt): 5 × 540 + 300      │
+│ = 3 000 km                                       │
+│                                                  │
+│ [⧉ Kopiuj z tyg. 22]                             │
+│ ✓ Wszystkie zmiany zapisane · ostatnia 14:32     │
+│ Enter — następny tydzień · Shift+Enter — poprz.  │
+│ [‹ Tydz. 22]                       [Tydz. 24 ›]  │
+└──────────────────────────────────────────────────┘
+```
+
+- **Оболочка:** `rounded-xl border border-border bg-card shadow-card p-4`; заголовок `panel` — `text-base font-bold` (`common.isoWeek.fullWithRange`, дата с годом), подзаголовок «{месяц} · {квартал}» `text-xs text-text-sub` + `currentBadge` у текущей недели. Без выделения — пустое состояние `panel.emptyTitle` / `panel.emptyBody` + `selection.selectYear`.
+- **Механика полей — ровно §16.3**, машина `lib/limits/guaranteeCell.ts` переиспользуется как есть: снятие галки сразу пишет `0`; установка галки не пишет ничего (состояние `unsaved`, `border-warning bg-warning/5`, строка `limits.unsaved`); пустое поле при уходе возвращает галку; память прежнего значения в сессии. Ставку выключить нельзя (галки нет, поле выровнено по инпутам выше).
+- **У галки есть видимая подпись** `panel.enabled` («Włączona»): в панели нет конфликта с выбором строки, из-за которого §16.2 прятала галку в ячейку. Подпись — часть `<label>`, хит-область ≥ 36 px по высоте. Доступное имя — `limits.toggleDay` / `toggleSaturday` с номером недели.
+- **Ввести `0` = выключить**: галка снимается сама — при быстром вводе не нужно тянуться к мыши.
+- **Дата субботы в подписи** (`panel.saturday`: «KM / SOBOTA (06.06)»): решение принимается про конкретный день.
+- **Строка «Maks. w tygodniu»** (`panel.maxWeekly`, `text-xs text-text-sub tabular-nums`) — проверка на опечатку (5400 вместо 540 сразу видно как 27 000 km). Клиентская подсказка, в выплатах не участвует; выключенное / NULL-значение подставляется как 0 / fallback соответственно.
+- **«Kopiuj z tyg. N»** (`<Button variant="outline" size="sm"><Copy size={14}/>`) копирует **и сохраняет** три значения предыдущей недели. NULL-поля источника пропускаются, строкой под кнопкой — `panel.copySkipped`. NULL не копируется никогда. У W01 кнопки нет.
+- **Прошлая неделя** (воскресенье недели < сегодня, дата Варшавы): `<LockNotice icon={Info}>` `panel.pastWeek` под подзаголовком. Поля **не** блокируются.
+- **`updatedAt`** (бывшая колонка «Zaktualizowano») — в строке статуса: «ostatnia {time}», `HH:mm` для сегодня, иначе `DD.MM.YYYY HH:mm`. У недели, которую никогда не сохраняли, строки статуса нет.
+- **Навигация** `‹ Tydz. 22` / `Tydz. 24 ›` (`ghost sm`) двигает выделение; на краях года кнопка отсутствует.
+
+#### §18.5.2 Автосохранение и обратная связь
+
+| Где | Что видно |
+|---|---|
+| Поле | как раньше в ячейке: спиннер в инпуте → зелёная рамка ~0,8 с; при ошибке `border-danger` + откат значения |
+| Плитка | обновляется оптимистично сразу; спиннер в углу, пока у недели есть записи в очереди; `border-danger` при ошибке |
+| Статус панели | `panel.saving` → `panel.saved` / `panel.failed` + кнопка `panel.retry` (`role="status"`) |
+| Toast | **только ошибки** (`limits.saveError`). Успех одиночной записи **не** тостится: 159 вводов = 159 тостов (уточнение §8.3 для этой страницы) |
+
+Очередь записей (`lib/limits/saveQueue.ts`) остаётся, ключ — `YYYY-Www`. Уход со страницы предупреждается **только** пока запись идёт; черновики `unsaved` не блокируют (§16.3).
+
+#### §18.5.3 Клавиатура и ARIA: ввод 53 × 3 без мыши
+
+| Где | Клавиша | Действие |
+|---|---|---|
+| Календарь | Tab | вход в сетку на выделенной или текущей неделе (roving tabindex — одна плитка в порядке табуляции) |
+| | ← / → | предыдущая / следующая неделя (линейно, через границы месяцев) |
+| | ↑ / ↓ | тот же слот в соседнем месяце (если слота нет — последняя неделя месяца) |
+| | Home / End · Ctrl+Home / End | первая / последняя неделя месяца · W01 / последняя неделя года |
+| | Shift + стрелки | расширить выделение (диапазон) |
+| | Ctrl/⌘ + Space | добавить / убрать неделю из выделения |
+| | Enter | перейти в первое поле панели |
+| | Esc | снять выделение (без записи) |
+| Панель | Tab / Shift+Tab | следующее / предыдущее поле той же недели |
+| | **Enter** | сохранить поле (как blur) → **следующая неделя, то же поле** (Enter «вниз» как в Excel). Невалидное значение — остаёмся, поле в ошибке |
+| | Shift+Enter | сохранить → предыдущая неделя, то же поле |
+| | Esc | откатить поле; повторный Esc возвращает фокус на плитку |
+
+Enter оставляет то же поле, потому что самый частый ввод — «колонкой» (ставка на 13 недель подряд). «Строкой» (540 ⇥ 300 ⇥ 0,50) работает Tab. Одинаковые значения на много недель удобнее ставить выделением (§18.6). Подсказка `panel.keysHint` — `text-[11px] text-text-sub` в панели. (Это исключение к §8.4 «Enter commits the cell»: здесь Enter коммитит и сдвигает.)
+
+**Выделение следует за фокусом**: стрелки в календаре сразу открывают неделю в панели. ARIA: календарь `role="grid" aria-multiselectable="true"`, строки = месяцы (`role="row"`, название — `rowheader`), плитки `gridcell` с `aria-selected`; строки кварталов — вне грида (заголовки `h3`). Панель — `<section aria-labelledby>` с заголовком недели; смена недели объявляется заголовком (`aria-live="polite"` только на заголовке, не на полях).
+
+### §18.6 — Массовое редактирование через выделение (вместо `<BulkLimitsDialog>`)
+
+#### §18.6.1 Как выделять
+
+| Жест | Результат |
+|---|---|
+| Клик по плитке | одна неделя (панель §18.5) |
+| Shift+клик | диапазон от якоря (W10–W22), через границы месяцев |
+| Ctrl/⌘+клик | добавить / убрать неделю |
+| Клик по названию месяца | все недели месяца **по правилу четверга**: строка месяца и есть этот набор |
+| «Zaznacz» у квартала | недели месяцев квартала |
+| `selection.selectYear` (в пустой панели и в панели N > 1) | все 52/53 |
+| `limits.defaultsSelect` в ноте | все не настроенные (§18.3) |
+| Поля «Od tyg. [10] do [22]» в панели | то же, что Shift+клик, с клавиатуры; синхронизированы с выделением; `from > to` — границы меняются местами молча |
+
+#### §18.6.2 Панель при N > 1
+
+```
+┌ Zaznaczono 13 tygodni ──────────────────────── ✕ ┐
+│ tyg. 10–22 · 02.03–31.05.2026                    │
+│ Od tyg. [10]  do [22]                            │
+│                                                  │
+│ KM / DZIEŃ     [ Bez zmian              ▾ ]      │
+│ KM / SOBOTA    [ Włącz i ustaw wartość  ▾ ]      │
+│                [ 300 ]                           │
+│ STAWKA € / KM  [            ] (puste = bez zmian)│
+│ [Wypełnij wartościami tyg. 10]                   │
+│                                                  │
+│ PODSUMOWANIE                                     │
+│ Zmienisz 13 z 13 tygodni.                        │
+│ 9 tygodni ma już ustawione wartości — zostaną    │
+│ nadpisane.                                       │
+│ Operacji nie można cofnąć. Poprzednie wartości   │
+│ pozostaną widoczne w audycie.                    │
+│ [▸ Tabela zmian (13)]                            │
+│                                                  │
+│ [Anuluj]            [Zastosuj do 13 tygodni]     │
+└──────────────────────────────────────────────────┘
+```
+
+- **Три исхода на поле (как §16.4):** `<Select>` «Bez zmian» (default) · «Włącz i ustaw wartość» · «Wyłącz (0 km)»; числовой инпут появляется только при «Włącz i ustaw» (`RevealInset`, §13.2.1). Ставка — просто `<Input>`, пусто = без изменений. «Ustaw» с пустым значением — ошибка `bulk.errorValueRequired`, не тихий ноль. **«Не трогать» и «поставить 0» — два разных пункта.**
+- **`bulk.fillFrom` («Wypełnij wartościami tyg. 10», fill-down)** предзаполняет форму значениями первой выделенной недели (NULL-поля источника → «Bez zmian»). Только предзаполнение: запись идёт той же кнопкой.
+- **Предпросмотр прямо в календаре.** Пока форма что-то меняет, выделенные плитки показывают в изменяемых строках `было → станет`: старое `text-text-sub`, `<ArrowRight size={10} aria-hidden>`, новое `font-semibold text-text`; у NULL-источника — `dom. → 300` (`bulk.valueDefaultShort`). Не меняющиеся значения остаются как были.
+- **Сводка** (`bulk.summaryLegend`): `summaryHeadline`, `summaryOverwrite` (считает недели в B/C, где что-то реально затирается), `summaryNoop` при наличии, `summaryIrreversible`.
+- **`bulk.changesTable` «Tabela zmian (N)»** — раскрываемая (`aria-expanded`) таблица «Obecnie → Po zmianie» по неделям: колонки `bulk.colWeek` · Km/dzień · Km/sobota · Stawka, `max-h-80 overflow-y-auto`, липкая шапка `<th>` (`bulk.colCurrent` / `bulk.colNew` как подписи групп). Ячейки: старое значение `text-text-sub tabular-nums`; стрелка — `<ArrowRight size={12} className="text-text-sub" aria-hidden>` + sr-only `bulk.arrowSr` (иконкой, не символом `→`, чтобы скринридер не читал «стрелка вправо» десятки раз); новое `font-semibold text-text tabular-nums`; без изменений — `bulk.valueNoChange` `text-text-sub`; неделя, где не меняется ничего, — вся `<tr>` `text-text-sub`. Обязательна для скринридеров и длинных выделений. В «Obecnie» никогда нет пустой ячейки: `bulk.valueNone` / `bulk.valueDisabled`.
+- **Кнопка называет объём** (`bulk.apply`: «Zastosuj do 13 tygodni»); `disabled`, пока нет ни одного изменения (`bulk.errorNoChanges` в слоте `mr-auto text-sm text-danger role="alert"`). Второго диалога подтверждения нет: сводка и есть подтверждение.
+- **Запись атомарная** (один bulk-запрос). Успех → `toast.success(bulk.successToast)`, выделение схлопывается до первой недели диапазона (панель в режиме «tydzień»). Ошибка → `toast.error`, панель остаётся с формой. Пер-строчного результата и «Ponów nieudane» нет.
+- **Автосохранения в этом режиме нет.** Заголовок панели («Zaznaczono 13 tygodni» vs «Tydzień 23») разводит два режима.
+- **Форма живёт, пока N > 1**: смена выделения пересчитывает предпросмотр и сводку. Когда выделение сужается до одной недели, форма отбрасывается без записи. Esc / «Anuluj» = снять выделение без записи. Уход со страницы с заполненной формой не блокируется (в БД ничего не изменилось).
+
+### §18.7 — Разбивка по неделям: `<BreakdownTable>` (перевозчик, живое превью, ClaimModal)
+
+Компонент один, меняется **содержимое строк**. Stat-карточки `<LivePreviewPanel>`, нота смешанного периода (§16.5.3), пустое состояние «весь период выключен» (§16.5.4), правило «— вместо ставки-призрака» (§16.5.2), блок «Pierwszy / ostatni dzień okresu», раскрытие «Dni wyłączone» — остаются.
+
+#### §18.7.1 Широкая таблица (контейнер ≥ 36rem)
+
+```
+TYDZIEŃ                                     DNI ROB.  KM/DZ.  SOB.  €/KM   KM/TYDZ.
+Tydz. 23 · 03.06–07.06  ▸(1 dzień)                2     540   300   0,50     1 380
+Tydz. 24 · 08.06–14.06                            5     540     —   0,50     2 700
+Tydz. 25 · 15.06–21.06  [Gwarancja wyłączona]     5       0     —      —         0   ← bg-input/40
+Tydz. 26 · 22.06–28.06  [Tylko sobota]            5       0   300   0,50       300
+Tydz. 27 · 29.06–02.07                            4     540     0   0,50     2 160
+RAZEM (KM GWARANT.)                                                          6 540
+```
+(Пример: wniosek 03.06–02.07.2026; 04.06 — Boże Ciało, уходит в «Dni wyłączone»; суббота 04.07 вне периода → `0`.)
+
+| Колонка | Header PL / EN | Формат |
+|---|---|---|
+| Неделя | `week` «Tydzień» / «Week» | `common.isoWeek.withRange`, **даты обрезаны по периоду wniosku**; полный диапазон — `title` и sr-only `common.isoWeek.fullWeekTitle` |
+| `workingDays` | «Dni rob.» / «Work days» | целое, только пн–пт |
+| `kmPerDay` | «Km/dz.» / «Km/day» | целое |
+| Суббота | `saturday` «Sob.» / «Sat.» | три состояния, ниже |
+| `ratePerKm` | «€/km» | как раньше |
+| Итог недели | `kmInWeek` «Km/tydz.» / «Km/wk» | целое с разделителем тысяч, `font-semibold` |
+
+- **Подпись строки** обрезана по периоду: первая и последняя неделя показывают только свои дни (перевозчик мыслит датами выезда). Чтобы «Tydz. 23 · 03.06–07.06» не читалась как полная неделя, полный диапазон есть в `title` и для скринридера.
+- **Колонка «Sob.»** делает арифметику видимой (`Dni × Km/dz. + Sob. = Km/tydz.`). Три состояния ячейки:
+  - `300` — суббота зачтена;
+  - `—` (`text-text-sub`, `title` = `saturdayNoneTitle`) — у недели нет субботней гарантии;
+  - `0` (`text-text-sub`, `title` = `saturdayNotCountedTitle`) — гарантия есть, но суббота не зачтена: вне периода wniosku или выключенный день (праздник / запрет). Сама дата, как и раньше, попадает в «Dni wyłączone».
+- **Режим недели — существующие бейджи** (`<Badge variant="outline" className="border-border text-text-sub text-[11px]">`): `guaranteeDisabled` (неделя `bg-input/40`, `Km/dz.` и `Km/tydz.` `0` в `text-text-sub` без веса, ставка `—`), `guaranteeSaturdayOnly` «Tylko sobota» (не приглушается, платит). Активная неделя без бейджа.
+- **Раскрытие «Dni wyłączone»** — `<WeekToggle>` (бывший `<MonthToggle>`: шеврон + подпись + число дней) у подписи недели; под-строка с датами `colSpan={6}` (staff — `8`). Подстроки «Soboty n × km» больше нет.
+- **Строки не сворачиваются и не группируются по месяцам.** В финансовой разбивке строки не прячем; 13 строк по `h-10` ≈ 520 px — нормально для превью и модалки. Группировка по месяцам по правилу четверга сбила бы перевозчика (неделя 29.06–05.07 «в июле»).
+- **Итог** — без изменений: `totalKmGuaranteed` «Razem (km gwarant.)», `tfoot` лейбл `colSpan={5}` + значение.
+- Таблица по-прежнему `text-xs`, ячейки `px-2 py-2 h-10`, заголовки `whitespace-nowrap`.
+
+#### §18.7.2 Staff: колонки tablicy km (ClaimModal), порог 46rem
+
+Контракт §16.5.5 без изменений по смыслу, только по неделям: соединение `boardSettlement` ↔ строки разбивки — **по ключу недели**; правило «одна пара данных» (`claim.breakdown` + `claim.boardSettlement`) — как в §16.5.5 / §16.5.9.
+
+- Справа от `Km/tydz.` через `border-l border-border` — «Km wg weryfikatora» и «Wpisane dni». Колонок 8.
+- «Wpisane dni»: `boardDaysValue` «5 z 5» (у обрезанной недели — «2 z 2»); неделя «tylko sobota» — `boardSaturdaysValue` «1 z 1 sob.»; неполная неделя — янтарь + `<AlertTriangle size={12}>` + sr-only `boardDaysMissingSr` (рецепт §16.5.5); `off` → `—` с `title` = `boardOffTitle`; `daysRequired === 0` → `—`.
+- `tfoot`: лейбл `total` «Razem» `colSpan={5}` | `kmGuaranteed` | `boardSettlement.mileageEffective` (`border-l`) | пусто.
+- **Порог staff-варианта — 46rem** (было 40rem). ClaimModal (тело ≈ 52rem) на десктопе показывает таблицу. Классы литеральные: два полных набора строк через `cn(boardMode ? '…46rem…' : '…36rem…')`.
+- `<BoardGapNotice>`, гейт `ZAAKCEPTOWANO`, строки niedojazdu — без изменений, кроме формулировок «w miesiącach» → «w tygodniach» (§16.5.7, §16.5.10).
+
+#### §18.7.3 Узкий контейнер (< 36rem, staff < 46rem): свёрнутые строки
+
+```
+┌──────────────────────────────────────────────┐
+│ ▸ Tydz. 23 · 03.06–07.06            1 380 km │
+│ ▸ Tydz. 24 · 08.06–14.06            2 700 km │
+│ ▸ Tydz. 25 · 15.06–21.06  [Wyłączona]   0 km │  ← bg-input/40
+│ ▾ Tydz. 26 · 22.06–28.06  [Tylko sob.] 300 km│
+│     Dni rob.     5      Km/dz.      0        │
+│     Sobota     300      €/km     0,50        │
+│ ▸ Tydz. 27 · 29.06–02.07  ⚠         2 160 km │  ← staff: неполная tablica
+├──────────────────────────────────────────────┤
+│ RAZEM (KM GWARANT.)                    6 540 │
+└──────────────────────────────────────────────┘
+```
+
+- Карточки 2×2 на 13 неделях дали бы ~1 600 px на телефоне. Вместо них — **одна строка на неделю**: `<button aria-expanded aria-controls>` на всю строку, `flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left`, `<ChevronRight size={14}>` (поворот при раскрытии), подпись, бейдж, справа `Km/tydz.` `font-semibold tabular-nums` + «km». Строки разделены `divide-y divide-border`.
+- Раскрытие — `<dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 pl-8">` (`dt` `text-text-sub`, `dd` `tabular-nums`): Dni rob., Km/dz., Sobota, €/km (у выключенной недели строки `€/km` нет — правило §16.5.2). Staff — ниже под `border-t border-border/60 pt-2` две строки на всю ширину (`col-span-2`): «Km wg weryfikatora», «Wpisane dni»; у `off`-недели блока нет. Даты «Dni wyłączone» — внутри раскрытия.
+- **Сигналы не прячутся в свёрнутом виде:** бейдж режима и у staff `AlertTriangle` неполной tablicy видны без раскрытия.
+- Бейджи на узкой ширине короче: `guaranteeDisabledShort` «Wyłączona», `guaranteeSaturdayOnlyShort` «Tylko sob.». Кнопка раскрытия — `aria-label` из существующих `showDetails` / `hideDetails` + подпись недели.
+- Итоговая плашка `bg-bg`: `totalKmGuaranteed`; у staff вторая строка `boardTotalKm` (`mt-1.5`). Горизонтального скролла нет.
+
+#### §18.7.4 Переключение раскладок
+
+Как и раньше, **по ширине контейнера, а не вьюпорта**: корень `@container`, раскладки `@max-[36rem]:… / @min-[36rem]:…` (staff — `46rem`). Пороги выросли из-за шестой (staff — восьмой) колонки. Обоснование container queries — §`<BreakdownTable>` «Responsive behavior».
+
+### §18.8 — `<RecalcLimitsDialog>`: было / стало по неделям
+
+Кнопка «Przelicz wg aktualnych limitów» и её место — §16.6, без изменений. Диалог расширяется с `max-w-md` до **`max-w-lg`** и показывает, **какая неделя wniosku** изменилась:
+
+```
+┌ Przelicz wg aktualnych limitów ────────────────────────────┐
+│ Porównaj kwoty wyliczone przy złożeniu wniosku z kwotami   │
+│ wg aktualnych limitów. Zapis nadpisze kwoty wniosku.       │
+│                                                            │
+│                    Wniosek (obecnie)    Wg aktualnych      │
+│ Km gwarantowane          6 540      →        6 440         │
+│ Dopłata               1 040,00 €    →      990,00 €        │
+│                                  Różnica: −50,00 €         │
+│                                                            │
+│ ZMIENIONE LIMITY (2 TYGODNIE)                              │
+│ Tydz. 24 · 08.06–14.06                 2 700 → 2 500 km    │
+│   Km/dz. 540 → 500                                         │
+│ Tydz. 26 · 22.06–28.06                   300 → 400 km      │
+│   Sobota 300 → 400                                         │
+│ Pozostałe 3 tygodnie bez zmian.                            │
+│                                                            │
+│                 [ Anuluj ]  [ Zastosuj nowe kwoty ]        │
+└────────────────────────────────────────────────────────────┘
+```
+
+- **Деньги — сверху** (решение принимается о сумме), ниже — **только изменённые недели** (`changedWeeks`, заголовок `text-xs font-bold uppercase tracking-wider text-text-sub`). Первая строка — подпись недели (обрезанная по периоду, как в разбивке) + `Km/tydz.` было → стало (`text-sm tabular-nums`; если `Km/tydz.` не изменился — одно число без стрелки); вторая — `text-xs text-text-sub`: какие значения лимита сдвинулись (`fieldKmPerDay` / `fieldSaturday` / `fieldRate`, через « · »). Неизменные недели — одной строкой `unchangedWeeks`.
+- Значения «было» никогда не пустые: `wył.`, `—` (нет субботы), `540 dom.`.
+- Стрелки — `<ArrowRight size={12} aria-hidden>` + sr-only `bulk.arrowSr`. Дельты **без семантического цвета** (правило §16.6).
+- Больше 6 изменённых недель: первые 5 + `showAll` «Pokaż wszystkie (N)» (`aria-expanded`, паттерн списка дат `<BoardGapNotice>`).
+- Скелетон, `noChange` (футер → «Zamknij»), `toZero`, ошибка (диалог остаётся открытым) — как в §16.6.
+
+### §18.9 — i18n (PL default + EN)
+
+**Форматы.** Неделя: «Tydz. 23» / «Tydzień 23», EN «Wk 23» / «Week 23». Диапазон: `Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit' })` → PL `01.06–07.06`, EN (en-GB) `01/06–07/06`; дата вне показанного года — с `year: 'numeric'`. Короткое тире `–` без пробелов, как в `weryfikator.km.nav.weekLabel`. Для `aria-label` диапазон длинный: `Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).formatRange(from, to)` → «1–7 czerwca 2026». `YYYY-MM-DD` парсится как **локальная** дата (`new Date(y, m − 1, d)`), не через UTC. Формат «W23» (KPI tablicy km) в UI лимитов и разбивки не используется.
+
+**Новый общий блок `common.isoWeek`** (лимиты, разбивка, recalc; `weryfikator.km.nav.weekLabel` можно перевести на него):
+
+| Ключ | PL | EN |
+|---|---|---|
+| `short` | `Tydz. {week}` | `Wk {week}` |
+| `full` | `Tydzień {week}` | `Week {week}` |
+| `withRange` | `Tydz. {week} · {from}–{to}` | `Wk {week} · {from}–{to}` |
+| `fullWithRange` | `Tydzień {week} · {from}–{to}` | `Week {week} · {from}–{to}` |
+| `count` | `{count, plural, one {# tydzień} few {# tygodnie} many {# tygodni} other {# tygodnia}}` | `{count, plural, one {# week} other {# weeks}}` |
+| `fullWeekTitle` | `Pełny tydzień: {from}–{to}` | `Full week: {from}–{to}` |
+
+**`limits.*` — полный расклад.**
+
+*Без изменений:* `title`, `prevYear`, `nextYear`, `saveError`, `unsaved`, `unsavedRevertedSr`, `disabledRateHint`, `placeholderDefault`, `placeholderNoChange`, `months.*` (названия строк календаря), `columns.ratePerKm` (подпись ставки в панели), `columns.kmPerDay` / `columns.kmPerSaturday` (столбцы «Tabela zmian»), `bulk.valuesLegend`, `bulk.actionNoChange` / `actionSet` / `actionDisable`, `bulk.kmPerDayAction` / `kmPerSaturdayAction`, `bulk.ratePerKm`, `bulk.rateHint`, `bulk.errorValueRequired`, `bulk.errorNoChanges`, `bulk.summaryLegend`, `bulk.summaryIrreversible`, `bulk.colCurrent` / `colNew`, `bulk.arrowSr`, `bulk.valueNone` / `valueDisabled` / `valueNoChange`, `bulk.applying`.
+
+*Удаляются:* `stateDefault`, `stateDisabled`, `columns.month`, `columns.updatedAt`, `bulk.trigger`, `bulk.title`, `bulk.description`, `bulk.rangeLegend`, `bulk.rangeAll`, `bulk.rangeFromTo`, `bulk.rangeCustom`, `bulk.from`, `bulk.to`, `bulk.monthsPlaceholder`, `bulk.monthsSearchPlaceholder`, `bulk.monthsEmpty`, `bulk.errorNoMonths`, `bulk.colMonth`, `bulk.partialError`, `bulk.retryFailed`, `bulk.rowOk`, `bulk.rowFailed`.
+
+*Изменённые и новые:*
+
+| Ключ | PL | EN |
+|---|---|---|
+| `subtitle` | `Km/dzień, km/sobota i stawka €/km dla każdego tygodnia ISO` | `Km/day, km/Saturday and €/km rate for every ISO week` |
+| `isoHint` | `Tygodnie ISO (pn–nd). Tydzień należy do miesiąca i roku, w którym wypada jego czwartek.` | `ISO weeks (Mon–Sun). A week belongs to the month and year of its Thursday.` |
+| `yearSpan` | `{weeks} · {from} – {to}` | `{weeks} · {from} – {to}` |
+| `currentWeek` | `Bieżący tydzień` | `This week` |
+| `currentBadge` | `bieżący` | `current` |
+| `quarter` | `{q, select, 1 {I} 2 {II} 3 {III} other {IV}} kwartał · tyg. {from}–{to}` | `Q{q} · weeks {from}–{to}` |
+| `legend.kmPerDay` / `.saturday` / `.rate` | `km/dzień` / `sobota` / `€/km` | `km/day` / `Saturday` / `€/km` |
+| `valueDefault` | `{value} dom.` | `{value} def.` |
+| `valueOff` | `wył.` | `off` |
+| `tileAria` | `Tydzień {week}, {range}: gwarancja dzienna {kmPerDay}, sobota {saturday}, stawka {rate}{current, select, true {, bieżący tydzień} other {}}` | `Week {week}, {range}: daily guarantee {kmPerDay}, Saturday {saturday}, rate {rate}{current, select, true {, current week} other {}}` |
+| `sr.km` / `sr.rate` | `{value} km` / `{value} €` | `{value} km` / `{value} €` |
+| `sr.default` | `{value} (wartość domyślna)` | `{value} (default)` |
+| `sr.off` / `sr.saturdayNone` | `wyłączona` / `brak gwarancji` | `off` / `no guarantee` |
+| `defaultsNotice` | `{count, plural, one {# tydzień nie ma konfiguracji} few {# tygodnie nie mają konfiguracji} many {# tygodni nie ma konfiguracji} other {# tygodnia nie ma konfiguracji}} — obowiązuje {kmPerDay} km/dzień i {rate} €/km.` | `{count, plural, one {# week has no configuration} other {# weeks have no configuration}} — {kmPerDay} km/day and {rate} €/km apply.` |
+| `defaultsSelect` | `Zaznacz te tygodnie` | `Select these weeks` |
+| `independenceHint` | `Gwarancja dzienna i sobotnia są niezależne — tydzień może mieć włączoną tylko sobotę.` | `The daily and Saturday guarantees are independent — a week can have only its Saturday enabled.` |
+| `unsavedHint` | `Wpisz wartość, aby włączyć gwarancję. Puste pole = tydzień pozostaje wyłączony.` | `Enter a value to enable the guarantee. An empty field means the week stays disabled.` |
+| `toggleDay` / `toggleSaturday` | `Gwarancja km/dzień — {week}` / `Gwarancja w sobotę — {week}` | `Daily km guarantee — {week}` / `Saturday guarantee — {week}` |
+| `panel.enabled` | `Włączona` | `Enabled` |
+| `panel.weekdays` | `Km / dzień (pn–pt)` | `Km / day (Mon–Fri)` |
+| `panel.saturday` | `Km / sobota ({date})` | `Km / Saturday ({date})` |
+| `panel.notConfigured` | `Nie skonfigurowano — obowiązuje {value}` | `Not configured — {value} applies` |
+| `panel.maxWeekly` | `Maks. w tygodniu (bez świąt): {formula} = {total} km` | `Weekly maximum (excl. holidays): {formula} = {total} km` |
+| `panel.copyPrev` | `Kopiuj z tyg. {week}` | `Copy from wk {week}` |
+| `panel.copySkipped` | `Pominięto: {fields} — tydzień {week} nie ma wartości.` | `Skipped: {fields} — week {week} has no value.` |
+| `panel.pastWeek` | `Tydzień już minął. Zmiana nie przelicza złożonych wniosków — służy do tego „Przelicz wg aktualnych limitów” we wniosku.` | `This week is over. The change does not recalculate submitted claims — use “Recalculate with current limits” on the claim.` |
+| `panel.saving` / `.saved` / `.failed` / `.retry` | `Zapisywanie…` / `Wszystkie zmiany zapisane · ostatnia {time}` / `Nie zapisano — ` / `Ponów` | `Saving…` / `All changes saved · last {time}` / `Not saved — ` / `Retry` |
+| `panel.keysHint` | `Enter — następny tydzień · Shift+Enter — poprzedni` | `Enter — next week · Shift+Enter — previous` |
+| `panel.prevWeek` / `.nextWeek` | `Tydz. {week}` (+ `aria-label` `Poprzedni tydzień` / `Następny tydzień`) | `Wk {week}` (`Previous week` / `Next week`) |
+| `panel.emptyTitle` / `.emptyBody` | `Wybierz tydzień` / `Kliknij tydzień, aby go edytować. Shift+klik zaznacza zakres, nazwa miesiąca — cały miesiąc.` | `Select a week` / `Click a week to edit it. Shift+click selects a range, a month name selects the whole month.` |
+| `panel.lastWeekOfYear` (sr) | `Ostatni tydzień roku` | `Last week of the year` |
+| `selection.title` | `Zaznaczono {count, plural, one {# tydzień} few {# tygodnie} many {# tygodni} other {# tygodnia}}` | `{count, plural, one {# week} other {# weeks}} selected` |
+| `selection.weeks` | `tyg. {list}` (`{list}` — компактный список «10–22» / «3, 7, 10–12»; даты добавляются только у непрерывного диапазона) | `wk {list}` |
+| `selection.from` / `.to` | `Od tyg.` / `do` | `From wk` / `to` |
+| `selection.selectQuarter` / `.selectQuarterAria` | `Zaznacz` / `Zaznacz tygodnie: {quarter}` | `Select` / `Select weeks: {quarter}` |
+| `selection.selectMonthAria` | `Zaznacz tygodnie miesiąca {month}` | `Select the weeks of {month}` |
+| `selection.selectYear` / `.clear` | `Zaznacz cały rok` / `Wyczyść zaznaczenie` | `Select whole year` / `Clear selection` |
+| `bulk.fillFrom` | `Wypełnij wartościami tyg. {week}` | `Fill with week {week} values` |
+| `bulk.valueDefaultShort` | `dom.` | `def.` |
+| `bulk.summaryHeadline` | `Zmienisz {changed} z {total} {total, plural, one {tygodnia} other {tygodni}}.` | `You are changing {changed} of {total} weeks.` |
+| `bulk.summaryOverwrite` | `{count, plural, one {# tydzień ma już ustawione wartości — zostanie nadpisany} few {# tygodnie mają już ustawione wartości — zostaną nadpisane} many {# tygodni ma już ustawione wartości — zostaną nadpisane} other {# tygodnia ma już ustawione wartości — zostaną nadpisane}}.` | `{count, plural, one {# week already has values — it will be overwritten} other {# weeks already have values — they will be overwritten}}.` |
+| `bulk.summaryNoop` | `{count, plural, one {# tydzień bez zmian} few {# tygodnie bez zmian} many {# tygodni bez zmian} other {# tygodnia bez zmian}}.` | `{count, plural, one {# week unchanged} other {# weeks unchanged}}.` |
+| `bulk.apply` | `{count, plural, one {Zastosuj do # tygodnia} few {Zastosuj do # tygodni} many {Zastosuj do # tygodni} other {Zastosuj do # tygodnia}}` | `{count, plural, one {Apply to # week} other {Apply to # weeks}}` |
+| `bulk.successToast` | `{count, plural, one {Zaktualizowano # tydzień} few {Zaktualizowano # tygodnie} many {Zaktualizowano # tygodni} other {Zaktualizowano # tygodnia}}` | `{count, plural, one {# week updated} other {# weeks updated}}` |
+| `bulk.changesTable` / `.colWeek` | `Tabela zmian ({count})` / `Tydzień` | `Changes table ({count})` / `Week` |
+
+**`carrier.breakdown.*`.** *Удаляются:* `month`, `kmInMonth`, `saturdays`, `saturdaysDetail`. *Изменённые тексты:* `guaranteeSaturdayOnly`, `rateNoneTitle`, `allDisabledBody` (§16.7), `mixedPeriodNotice`, `boardNotice`, `boardOffTitle` (§16.5.7) — полные строки там, обновлены 2026-10-29. *Новые:*
+
+| Ключ | PL | EN |
+|---|---|---|
+| `week` | `Tydzień` | `Week` |
+| `saturday` | `Sob.` | `Sat.` |
+| `kmInWeek` | `Km/tydz.` | `Km/wk` |
+| `saturdayNoneTitle` | `Brak gwarancji sobotniej w tym tygodniu` | `No Saturday guarantee this week` |
+| `saturdayNotCountedTitle` | `Sobota z gwarancją, ale niezaliczona — poza okresem wniosku albo dzień wyłączony.` | `Guaranteed Saturday not counted — outside the claim period or an excluded day.` |
+| `guaranteeDisabledShort` / `guaranteeSaturdayOnlyShort` | `Wyłączona` / `Tylko sob.` | `Off` / `Sat. only` |
+
+**`employee.claims.modal.*`.** `boardGate.body` и `shortfall.*` — «w miesiącach» → «w tygodniach» (полные строки в §16.5.7 и §16.5.10, обновлены 2026-10-29). Новое в **`recalcLimits`** (так называется объект в коде; §16.7 называет его `recalc`):
+
+| Ключ | PL | EN |
+|---|---|---|
+| `changedWeeks` | `Zmienione limity ({count, plural, one {# tydzień} few {# tygodnie} many {# tygodni} other {# tygodnia}})` | `Changed limits ({count, plural, one {# week} other {# weeks}})` |
+| `unchangedWeeks` | `{count, plural, one {Pozostały # tydzień bez zmian.} few {Pozostałe # tygodnie bez zmian.} many {Pozostałych # tygodni bez zmian.} other {Pozostałe # tygodnia bez zmian.}}` | `{count, plural, one {The other week is unchanged.} other {The other # weeks are unchanged.}}` |
+| `showAll` | `Pokaż wszystkie ({count})` | `Show all ({count})` |
+| `fieldKmPerDay` / `fieldSaturday` / `fieldRate` | `Km/dz.` / `Sobota` / `€/km` | `Km/day` / `Saturday` / `€/km` |
+
+### §18.10 — Адаптивность
+
+| Ширина | Страница лимитов | Разбивка |
+|---|---|---|
+| ≥ 1280 px (`xl`) | календарь + закреплённая панель справа (22rem) | — |
+| 768–1279 px | календарь на всю ширину; панель — правый `<Sheet>` поверх, открывается выделением, закрытие = снятие выделения | — |
+| < 768 px | месяц = заголовок + плитки `grid-cols-2`; подписи значений переходят внутрь плиток (подпись слева `text-[11px] text-text-sub`, число справа); панель — нижний `<Sheet>` на всю ширину | — |
+| контейнер ≥ 36rem (staff ≥ 46rem) | — | таблица §18.7.1 / §18.7.2 |
+| контейнер < 36rem (staff < 46rem) | — | свёрнутые строки §18.7.3 |
+
+Админ-страница ориентирована на десктоп: на телефоне работает, но не оптимизирована. Разбивка переключается **по ширине контейнера** (§18.7.4).
+
+### §18.11 — Токены и иконки
+
+**Новых токенов: 0. Правок `globals.css`: 0.** Используются: `bg-card`, `bg-bg`, `bg-input`, `bg-input/40`, `border-border`, `border-brand`, `border-brand/40`, `border-brand/60`, `bg-brand-50/40`, `dark:bg-brand/10`, `ring-brand/25`, `text-text`, `text-text-sub`, `text-warning-dark` / `dark:text-warning`, `border-warning`, `bg-warning/5`, `border-success`, `border-danger`, `shadow-card`. Иконки Lucide: `ArrowRight`, `Copy`, `Info`, `AlertTriangle`, `ChevronLeft`, `ChevronRight`, `ChevronDown`, `Loader2`, `X`, `CalendarOff` (как раньше). Эмодзи — нет.
+
+### §18.12 — Контракт данных (что UI ждёт от api / shared; форму решают они)
+
+- **Лимиты года ISO:** все 52/53 недели года с ключом `YYYY-Www`, датами пн / вс, `kmPerDay` / `kmPerSaturday` / `ratePerKm` (NULL-поля как `null`) и `updatedAt` (`null`, если неделю не сохраняли). По [docs/13](13-api-design.md) «Limits» api отдаёт только существующие строки `weekly_limits`; недостающие недели, их даты и месяц четверга UI достраивает общим хелпером недель ISO из shared (один для календаря и разбивки).
+- **Запись одной недели** по ключу `YYYY-Www`, partial-тело (только изменённое поле). **Атомарная bulk-запись** одной partial-правки на список недель.
+- **Значения fallback** (540 km/dzień, 0,50 €/km) — из той же константы shared, что использует движок; в web не захардкожены.
+- **Строка разбивки:** ISO-год и номер недели, полный диапазон недели, диапазон, обрезанный по периоду wniosku, `workingDays`, `kmPerDay`, `ratePerKm`, `kmPerSaturday`, дата субботы и её статус (`counted` / `notCounted` / `none`), км субботы, `kmInWeek`, исключённые дни.
+- **`boardSettlement` по неделям:** ключ недели, `mode`, `km`, `daysFilled` / `daysRequired`; верхнеуровневые `mileageEffective`, `complete`, `missingDates` — как раньше.
+- **Dry run пересчёта лимитов по неделям:** для каждой недели wniosku — лимиты и `kmInWeek` «было / стало»; итоги — как раньше.
+
+### §18.13 — Компоненты / файлы (сводка для web-agent)
+
+| Изменение | Где | Тип |
+|---|---|---|
+| `<LimitsView>` — шапка с годом недель, нота, календарь + панель, URL `?week=` | `apps/web/app/(employee)/employee/(admin)/limits/LimitsView.tsx` | переписать |
+| `<LimitsCalendar>` — грид кварталов / месяцев, roving tabindex, выделение | `apps/web/components/limits/LimitsCalendar.tsx` | **новый** |
+| `<WeekTile>` — плитка недели, состояния §18.2, предпросмотр §18.6.2 | `apps/web/components/limits/WeekTile.tsx` | **новый** |
+| `<WeekEditPanel>` — режимы «tydzień» / «N tygodni»; на < 1280 px внутри `<Sheet>` | `apps/web/components/limits/WeekEditPanel.tsx` | **новый** (композиция) |
+| `<LimitsRow>`, `<BulkLimitsDialog>` | `apps/web/components/limits/` | **удалить** |
+| `guaranteeCell`, `saveQueue` (ключ `YYYY-Www`), `limitState`, `bulkPlan` (план по списку недель) | `apps/web/lib/limits/` | правка |
+| `<BreakdownTable>` — колонки по неделям, «Sob.», свёрнутые строки, пороги 36 / 46rem, `<WeekToggle>` | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
+| `analyzeBreakdown` — признаки `disabled` / `saturdayOnly` по неделе | `apps/web/lib/claims/breakdownGuarantee.ts` (+ тест) | правка |
+| `<RecalcLimitsDialog>` — `max-w-lg`, список изменённых недель | `apps/web/components/claims/RecalcLimitsDialog.tsx`, `lib/claims/recalcLimitsDialogState.ts` | правка |
+| i18n §18.9 (+ строки §16.5.7, §16.5.10, §16.7) | `messages/pl.json`, `messages/en.json` | правка |
+
+### §18.14 — Acceptance checklist (§18, web-agent)
+
+- [ ] Календарь: 12 строк-месяцев, неделя — в месяце своего четверга; W01 2026 в январе с годом у даты «29.12.2025», W53 2026 — пятая плитка декабря; подпись IV квартала «tyg. 40–53» (в 52-недельном году — «40–52»).
+- [ ] Подписи `km/dzień · sobota · €/km` один раз на строку месяца, на базовых линиях чисел плиток.
+- [ ] NULL нигде не пустой: `540 dom.` / `0,50 dom.` янтарём только на значении; `wył.`; суббота NULL/0 → `—`. Приглушена только неделя, которая не платит ничего; «tylko sobota» не приглушена; прошлые недели не приглушены.
+- [ ] Нота `defaultsNotice` считает NULL у km/dzień **или** ставки; «Zaznacz te tygodnie» выделяет ровно эти недели.
+- [ ] Одна неделя: механика §16.3 в панели (снятие пишет `0`, установка не пишет, `unsaved`, возврат галки), ввод `0` снимает галку, ни один путь не пишет NULL.
+- [ ] Enter в поле панели сохраняет и переходит к следующей неделе в то же поле; Shift+Enter — назад; Esc откатывает; на последней неделе года фокус остаётся + sr-объявление.
+- [ ] Календарь: `role="grid"`, roving tabindex, стрелки / Home / End / Shift / Ctrl+Space по §18.5.3; выделение следует за фокусом.
+- [ ] Успешная запись одной недели **не** тостится; ошибка — тост + `border-danger` на плитке + статус панели с «Ponów».
+- [ ] N > 1: три исхода на поле, «Ustaw» без значения блокирует кнопку, предпросмотр «было → станет» в плитках, «Tabela zmian (N)» без пустых ячеек, кнопка называет число недель, запись одним атомарным запросом, автосохранения нет.
+- [ ] «Kopiuj z tyg. N» сохраняет, пропускает NULL-поля и сообщает об этом.
+- [ ] Прошлая неделя: нота `panel.pastWeek`, поля редактируемы.
+- [ ] Разбивка: строка «Tydz. N · DD.MM–DD.MM» с датами, обрезанными по периоду, полный диапазон в `title` / sr-only; колонка «Sob.» с тремя состояниями и `title`; бейджи «Gwarancja wyłączona» / «Tylko sobota»; ставка-призрак `—`; строки не группируются по месяцам.
+- [ ] Пороги разбивки — 36rem (staff 46rem), литеральные container-классы; узкий вид — свёрнутые строки с `aria-expanded`, бейдж и `AlertTriangle` видны в свёрнутом виде, без горизонтального скролла.
+- [ ] Staff: «Wpisane dni» по неделе («5 z 5», «1 z 1 sob.»), `tfoot` «Razem» сходится с колонкой.
+- [ ] `<RecalcLimitsDialog>` `max-w-lg`: деньги сверху, изменённые недели с изменившимися значениями, неизменные — одной строкой, > 6 → 5 + «Pokaż wszystkie (N)»; дельты без цвета.
+- [ ] Единица лимита в текстах — «tydzień», не «miesiąc»: лимиты (кроме названий строк календаря, `isoHint` и подсказок про выделение месяца), разбивка, нота смешанного периода, `boardGate`, niedojazd (PL и EN, паритет ключей).
+- [ ] Dark mode: выделенная плитка, приглушённая плитка, янтарные значения, brand-полоса текущей недели — AA / ≥ 3:1 в обеих темах.
+- [ ] **0 новых токенов, 0 новых примитивов, 0 правок `globals.css`.**
+
+---
 
 ## Deviations — BugBot header actions (web-agent, 2026-10-02)
 

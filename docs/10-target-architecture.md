@@ -160,7 +160,7 @@ MAGGuarantee/                          ← корень репозитория
 ## Что повторяем, что выкидываем
 
 ### Повторяем (функциональная идентичность)
-- Все бизнес-расчёты: `calcKmGwarantPerMonth`, `calcEasterGS`, `getEUBanDaysGS`, `calcBusinessDays`.
+- Все бизнес-расчёты: `calcKmGwarantPerMonth` (в порте — `calcKmGwarant`, с 2026-10-29 по неделям ISO, а не по месяцам), `calcEasterGS`, `getEUBanDaysGS`, `calcBusinessDays`.
 - Все публичные API-функции (см. `13-api-design.md`).
 - Все email-шаблоны (HTML переписать на React Email).
 - Внешние интеграции: VIES, Biała Lista MF, GPS tracker (положения авто из стороннего fleet-сервиса; API access ожидается, источник данных не решён; info-car.pl удалён решением 2026-10-22 — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)).
@@ -184,7 +184,7 @@ MAGGuarantee/                          ← корень репозитория
 2. **Контракт-first** — сначала Zod-схема DTO в `packages/shared`, потом backend (использует ту же схему через `ZodValidationPipe`), потом frontend (тот же `infer` из Zod). Один источник правды, без OpenAPI-промежутки.
 3. **One feature, one PR** — разработка вертикальными слайсами (auth → carrier → claims → ...). См. `17-migration-roadmap.md`.
 4. **Никакого parallel-running.** Старый GAS-код не работает в проде, не имеет реальных данных — нет dual-write, нет feature flags для постепенного rollout.
-5. **Тесты на расчёты обязательны** — `calcKmGwarantPerMonth` тестируется на ≥30 fixtures (написанных вручную, т.к. реальных wniosков нет). См. `17-migration-roadmap.md#тестирование-km-calc`.
+5. **Тесты на расчёты обязательны** — `calcKmGwarant` тестируется на ≥30 fixtures (написанных вручную, т.к. реальных wniosков нет). См. `17-migration-roadmap.md#тестирование-km-calc`.
 
 ## Не-цели на этом этапе
 

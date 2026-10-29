@@ -54,7 +54,7 @@ Defined in `.claude/agents/`. Always invoke `orchestrator-agent` first for any n
 1. **Build from scratch.** `Code.gs` / `index.html` are reference only.
 2. **Functional identity** with the legacy intent — the flow must work, byte-perfect copy is not required.
 3. **Vertical slices** by role: foundation → auth → carrier → pracownik+admin → opiekun → planista+dyspozytor → eksport+weryfikator → audit → launch.
-4. **`calcKmGwarantPerMonth` requires ≥30 fixture tests** (no real data exists, write them by hand).
+4. **`calcKmGwarant` (km-calc engine, per ISO week since 2026-10-29) requires ≥30 fixture tests** (write them by hand).
 5. **No chat feature** — explicitly removed.
 6. **No data migration** — empty DB + seed.
 7. **No parallel-running** — legacy isn't deployed, just sitting in the repo as reference.

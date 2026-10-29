@@ -226,7 +226,7 @@
 | Создавать / редактировать / деактивировать **перевозчиков** | `admin` (все) или `opiekun` (свои) |
 | Создавать / редактировать / деактивировать **авто, водителей, прицепы** | `admin` (все) или `opiekun` (свои) |
 | Управлять справочником **типов прицепов** | `admin` |
-| Менять лимиты км / ставки EUR (`MonthlyLimit`) | `admin` |
+| Менять лимиты км / ставки EUR по неделям (`WeeklyLimit`) | `admin` |
 | Создавать / редактировать **пользователей** любой роли | `admin` |
 | Видеть / читать **audit log** | `admin` |
 | Делать **hard-delete** чего бы то ни было | `admin` |
@@ -259,7 +259,7 @@
 | CRUD **водителей** (всех) | `addDriver` / `updateDriver` / `toggleDriverActive` / `removeDriver` |
 | CRUD **прицепов** (всех) | `addNaczepa` / `updateNaczepa` / `toggleNaczepaActive` / `removeNaczepa` |
 | Управление **справочником типов прицепов** | `addNaczepaTyp` / `toggleNaczepaTypActive` |
-| Менять **лимиты км / ставки** (`MonthlyLimit`) | `getLimityKm` (read) / `PUT /limits` (новое в API) |
+| Менять **лимиты км / ставки** (`WeeklyLimit`, по неделям ISO с 2026-10-29) | `getLimityKm` (read) / `PUT /limits` (новое в API) |
 | CRUD **пользователей** всех ролей (admin / pracownik / opiekun / planista / dyspozytor / eksport / weryfikator) | `POST/PATCH/DELETE /users` |
 | Hard-delete (cascading) перевозчиков, авто, водителей, прицепов с обязательным `powod` | `deleteCarrierHard` etc. |
 | Читать **audit log** | `GET /audit` |
@@ -431,7 +431,7 @@
 | `sso.manage` | ✅ |  |  |  |  |  |  |  | `/sso/*` |
 | `teams.manage` | ✅ |  |  |  |  |  |  |  | `/teams*` |
 | `trailer_types.manage` | ✅ |  |  |  |  |  |  |  | запись `/trailer-types*` (create, patch, deactivate, hard); `GET /trailer-types` — любой залогиненный |
-| `limits.manage` | ✅ |  |  |  |  |  |  |  | `GET /limits`, `PUT /limits/:yearMonth`, `POST /limits/bulk` |
+| `limits.manage` | ✅ |  |  |  |  |  |  |  | `GET /limits`, `PUT /limits/:isoWeek`, `POST /limits/bulk` |
 | `audit.read` | ✅ |  |  |  |  |  |  |  | `GET /audit` |
 | `diagnostics.manage` | ✅ |  |  |  |  |  |  |  | `GET /diagnostics/{db,mails,claims}`, `POST /diagnostics/mails/:jobId/resend` |
 

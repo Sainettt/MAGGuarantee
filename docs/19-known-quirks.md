@@ -103,15 +103,17 @@ Read: longer trips justify larger payouts before triggering Maksim's review. Cro
 
 Source of truth: `Code.gs:5968-5973`. Mention in [`docs/04-data-model.md#appconfig`](04-data-model.md) and [`docs/01-overview.md`](01-overview.md).
 
-💡 Backlog: pricing is hardcoded in legacy. Future: move to `MonthlyLimit` (per month-year) or a new `AuthThresholds` table. Until that lands, the constants need to be ported byte-perfect — domain experts have memorized them.
+💡 Backlog: pricing is hardcoded in legacy. Future: move to a new `AuthThresholds` table. Until that lands, the constants need to be ported byte-perfect — domain experts have memorized them.
 
 **What NOT to do:** do not change a single number without explicit stakeholder sign-off. Do not assume linear interpolation (it's a step function — `drivenDays = 30.99` returns 500, `drivenDays = 31.0` returns 800). Floor-to-int **before** the comparison.
 
 ---
 
-## 7. <a id="monthlyLimit-fallback"></a>`MonthlyLimit` fallback to 540 km/day
+## 7. <a id="weeklyLimit-fallback"></a><a id="monthlyLimit-fallback"></a>`WeeklyLimit` fallback to 540 km/day
 
-If `MonthlyLimit` has no row for a given `(year, month)`, the system **does not error** — it falls back to:
+> ⚠️ **UPDATE 2026-10-29 — лимиты по неделям ISO.** Таблица `monthly_limits` (год × месяц) заменена на `weekly_limits` (ISO-год × неделя), см. [04-data-model.md](04-data-model.md#weeklylimit--лимиты-на-неделю-iso). Всё, что ниже сказано про месяц, теперь действует **для недели**: те же три состояния, тот же пополевой fallback (540 / 0,5 / 0), тот же пин `FALLBACK_KM_PER_SATURDAY = 0`. Якорь `#monthlyLimit-fallback` оставлен как алиас для старых ссылок. Легаси-код ниже остаётся помесячным — это историческая справка.
+
+If `WeeklyLimit` has no row for a given `(isoYear, isoWeek)`, the system **does not error** — it falls back to:
 
 - `kmPerDay` → `AppConfig.km_dziennie_default = 540`
 - `ratePerKm` → `AppConfig.stawka_eur_default = 0.5`
@@ -140,7 +142,7 @@ Source of truth: `Code.gs:32` (CONFIG), `Code.gs:801-802` (sheet seed), `Code.gs
 | Состояние в БД | Смысл | km-calc |
 |---|---|---|
 | строки нет / колонка `NULL` | не сконфигурировано | fallback (540 км/дн, 0,5 €/км, **0** км/суббота) |
-| `0` | **выключено осознанно** | месяц даёт 0 км гарантии — fallback **НЕ** применяется |
+| `0` | **выключено осознанно** | неделя (до 2026-10-29 — месяц) даёт 0 км гарантии — fallback **НЕ** применяется |
 | `> 0` | значение | как задано |
 
 Легаси (и первая версия порта) трактовали «пусто» и «ноль» одинаково: `if (limity[y][m] !== undefined)` в GAS и `if (km === null || rate === null) continue` в `KmCalcService._loadMonthlyLimits` **выбрасывали строку целиком**. Для нуля это боевой дефект: строка `{kmPerDay: 0, ratePerKm: NULL}` (админ нажал «выключить» раньше, чем кто-то завёл ставку) давала месяцу **максимальную** гарантию 540 км/дн. Теперь:
@@ -148,17 +150,17 @@ Source of truth: `Code.gs:32` (CONFIG), `Code.gs:801-802` (sheet seed), `Code.gs
 - **fallback подставляется пополево**, а не выбрасыванием строки: `{kmPerDay: 300, ratePerKm: NULL}` → 300 км/дн по ставке 0,5 (раньше → 540 @ 0,5). Это намеренное изменение поведения частично заполненных строк;
 - строка, у которой **все три** колонки `NULL`, по-прежнему эквивалентна отсутствию строки (полный fallback);
 - `0` доезжает до движка как `0` (движок корректен: `Number.isFinite`, а не truthiness);
-- `kmPerSaturday` остаётся **opt-in**: отсутствие ключа сворачивается в 0 = «субботы выключены». Глобальный `FALLBACK_KM_PER_SATURDAY` **обязан остаться нулём** — движок трактует месячный `0` как «не задано» и проваливается в fallback, так что положительный fallback молча включил бы субботы во всех месяцах, где их явно выключили. Пин закреплён тестами (`packages/shared/tests/claim-settlement.test.ts` → «engine pin», `apps/api/src/modules/km-calc/km-calc.service.spec.ts` → «ENGINE PIN»).
+- `kmPerSaturday` остаётся **opt-in**: отсутствие ключа сворачивается в 0 = «субботы выключены». Глобальный `FALLBACK_KM_PER_SATURDAY` **обязан остаться нулём** — движок трактует `0` у недели как «не задано» и проваливается в fallback, так что положительный fallback молча включил бы субботы во всех неделях, где их явно выключили. Пин закреплён тестами (`packages/shared/tests/claim-settlement.test.ts` → «engine pin», `apps/api/src/modules/km-calc/km-calc.service.spec.ts` → «ENGINE PIN»).
 
-Валидация: `UpdateMonthlyLimitSchema` / `BulkUpdateMonthlyLimitsSchema` теперь `nonnegative()` (не `positive()`), и они — **единственная** защита от отрицательных значений: DB-CHECK на `monthly_limits` нет.
+Валидация: `UpdateWeeklyLimitSchema` / `BulkUpdateWeeklyLimitsSchema` — `nonnegative()` (не `positive()`), и они — **единственная** защита от отрицательных значений: DB-CHECK на `weekly_limits` нет.
 
-**What NOT to do:** не отвергать wniosek, когда для месяца просто **нет** строки `MonthlyLimit` — fallback тут по-прежнему тихий дефолт (админ видит пропуски в UI лимитов). Но **не путать это с нулём**: полностью выключенный период — это осознанное решение, и подача блокируется отдельным нарушением «Gwarancja km jest wyłączona dla tego okresu.» (тексты и диагностический бакет разведены — см. `ClaimsService._noGuaranteeViolation` и `DiagnosticsRepository.findClaimsHealth`). И не писать falsy-проверок (`x || 540`, `if (x)`) на `kmPerDay`/`ratePerKm` — только `?? ` / `!= null`, иначе выключенная гарантия молча превращается в максимальную.
+**What NOT to do:** не отвергать wniosek, когда для недели просто **нет** строки `WeeklyLimit` — fallback тут по-прежнему тихий дефолт (админ видит пропуски в UI лимитов). Но **не путать это с нулём**: полностью выключенный период — это осознанное решение, и подача блокируется отдельным нарушением «Gwarancja km jest wyłączona dla tego okresu.» (тексты и диагностический бакет разведены — см. `ClaimsService._noGuaranteeViolation` и `DiagnosticsRepository.findClaimsHealth`). И не писать falsy-проверок (`x || 540`, `if (x)`) на `kmPerDay`/`ratePerKm` — только `?? ` / `!= null`, иначе выключенная гарантия молча превращается в максимальную.
 
 ---
 
-## 8. <a id="easter-monday"></a>Easter Monday + EU bank holidays in `calcKmGwarantPerMonth`
+## 8. <a id="easter-monday"></a>Easter Monday + EU bank holidays in `calcKmGwarant`
 
-The km-guarantee calculation **excludes** non-working days from the working-days count. Non-working = Saturday + Sunday + EU bank holidays + **Easter Monday** (and other movable feasts derived from Easter).
+The km-guarantee calculation **excludes** non-working days from the working-days count. Non-working = Saturday (unless the week credits it — `kmPerSaturday > 0`, see [01](01-overview.md)) + Sunday + EU bank holidays + **Easter Monday** (and other movable feasts derived from Easter). A credited Saturday that lands on a ban day is not paid either.
 
 Easter is computed via the Gauss algorithm (`Code.gs:5908`, `calcEasterGS(year)`), and several days around Easter are added to the ban-set:
 
@@ -355,7 +357,7 @@ Read the relevant section before:
 | Claim verification / decision PATCH | #5, #6, #9 |
 | Claim e-mail recipients | #14, #15 |
 | Maksim authorization gate (automatic) | #5, #6 |
-| `calcKmGwarantPerMonth` port | #7, #8 |
+| `calcKmGwarant` port | #7, #8 |
 | Auth + login + session | #10, #12 |
 | Delegations module | #11, #13, #15, #16 |
 | Delegation timestamps / "now" / day bounds | #16 |

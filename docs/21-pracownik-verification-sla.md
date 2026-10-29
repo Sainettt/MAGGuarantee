@@ -31,7 +31,7 @@ deadline        = addPolishWorkingDays(anchorDate, 7)
 
 **Польские дни ustawowo wolne:** фиксированные — Nowy Rok 01-01, Trzech Króli 01-06, Święto Pracy 05-01, Konstytucji 3 Maja 05-03, Wniebowzięcie NMP 08-15, Wszystkich Świętych 11-01, Niepodległości 11-11, Boże Narodzenie 12-25 и 12-26; подвижные (через `calcEaster`) — Wielkanoc (Пн +1), Boże Ciało (+60). **Польша НЕ празднует Wielki Piątek (Good Friday).** Sat/Sun — нерабочие.
 
-**Тесты:** ≥30 фикстур (по культуре репо, как у `calcKmGwarantPerMonth`): дедлайны через каждый праздник, переход через Новый год + Trzech Króli, подвижные (Wielkanoc/Boże Ciało), якоря рядом с выходными, ровно-на-дедлайне (0 дней), overdue.
+**Тесты:** ≥30 фикстур (по культуре репо, как у `calcKmGwarant`): дедлайны через каждый праздник, переход через Новый год + Trzech Króli, подвижные (Wielkanoc/Boże Ciało), якоря рядом с выходными, ровно-на-дедлайне (0 дней), overdue.
 
 ## 4. Дашборд pracownik (derived — без миграции)
 

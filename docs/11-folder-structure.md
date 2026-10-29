@@ -80,7 +80,7 @@ MAGGuarantee/
     │   │   │   │   │   ├── claims.controller.ts
     │   │   │   │   │   ├── claims.service.ts
     │   │   │   │   │   ├── claims.repository.ts
-    │   │   │   │   │   ├── km-calc.service.ts  ← calcKmGwarantPerMonth
+    │   │   │   │   │   ├── km-calc.service.ts  ← calcKmGwarant
     │   │   │   │   │   ├── eu-calendar.service.ts ← calcEaster, getEUBanDays
     │   │   │   │   │   ├── claim-workflow.service.ts ← submit/update/reklamacja
     │   │   │   │   │   ├── nr-zgl.service.ts   ← генерация GWA/NNN/MM/RR (Redis-lock)
@@ -275,7 +275,7 @@ MAGGuarantee/
     │   ├── shared/                             # типы, валидаторы, бизнес-расчёты — clean TS
     │   │   ├── src/
     │   │   │   ├── domain/
-    │   │   │   │   ├── km-calc.ts              ← портированная calcKmGwarantPerMonth
+    │   │   │   │   ├── km-calc.ts              ← calcKmGwarant (порт calcKmGwarantPerMonth, по неделям ISO)
     │   │   │   │   ├── eu-calendar.ts
     │   │   │   │   └── nr-zgl.ts
     │   │   │   ├── schemas/                    ← Zod схемы (DTO)

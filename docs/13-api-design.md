@@ -536,15 +536,15 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 | GET `/claims/:nrZgl` | `buildClaimObj`. Для admin / pracownik ответ несёт **живой** `boardSettlement` смешанного периода (см. «Settlement смешанного периода» в «Ключевых DTO»); для przewoźnika, в списках и для полностью включённого периода — `null` | admin / pracownik / przewoznik(own) |
 | ~~GET `/claims/dashboard`~~ | Такого роута нет — статистика отдаётся `GET /diagnostics/dashboard` (см. Diagnostics); opiekun-scope у неё нет | admin / pracownik |
 | POST `/claims` | `submitNewClaim` | przewoznik |
-| PATCH `/claims/:nrZgl/verification` | (новое) **«Zapisz weryfikację»** — pracownik сохраняет свои корректировки ДО любого решения. Body — `VerifyClaimSchema` (только correction-поля: `dateStart`/`dateEnd`/`timeFrom`/`timeTo`/`mileage`/`hoursAdjusted`, все optional; **пустое тело легально** = «подтверждено как есть»). Ставит `verifiedAt`/`verifiedById`, при наличии корректировок пере-считывает km-calc (тот же движок, что PATCH) и перезаписывает `paymentEur` (`origPaymentEur` при этом НЕ трогается — он и есть запрошенная сумма). **Смешанный период** (есть месяц с `kmPerDay = 0` — выплата по km-доске, [20 §0⁵](20-phase-7-eksport-weryfikator.md)): пересчёт идёт **всегда**, даже с пустым телом (доска могла дописаться), с сохранёнными входами, включая применённый `hoursAdjustedValue`. Если у активных месяцев на доске есть незаписанные дни — `verifiedAt` ставится, корректировки и числа сохраняются (значит `ODRZUCONO` доступен), но **гейт Maksima и авто-переход статуса пропускаются в обе стороны**: статус и gate-поля не меняются, письмо Maksimu не уходит; принятие заблокировано 422 `CLAIM_BOARD_INCOMPLETE` до дозаполнения доски и повторной верификации. **Авто-переход статуса по порогу** (единственный механизм авторизации — ручного флоу нет): если итоговая dopłata СТРОГО выше `getAuthThreshold(drivenDays)`, wniosek авто-переводится `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE` (и система шлёт Maksimu письмо-подтверждение, amount-aware dedup); admin re-verify в `OCZEKUJE_NA_AUTORYZACJE`, опустивший сумму под порог, авто-откатывает статус `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI` и полностью чистит гейт. `decidedById` при авто-переходе НЕ трогается (это верификация, не решение). Повторяемо (re-verify перезаписывает; идемпотентный re-save над порогом в `OCZEKUJE` статус не трогает, re-notify только по amount-aware dedup). Авто-пересчёт выезда (`w_trasie→zjechal`) сбрасывает `verifiedAt`/`verifiedById` в NULL (данные изменились → нужна ре-верификация). 422 если статус ∉ {`NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`}; статус `OCZEKUJE_NA_AUTORYZACJE` доступен **только `admin`** (для `pracownik` — 422 `{code:'CLAIM_VERIFY_ADMIN_ONLY'}`, отличимый от статусного отказа). Audit `claim.verify`. | **admin / pracownik** |
-| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia) + разрешение рекламации. Body — discriminated union `UpdateClaimSchema` в `@magguarantee/shared/schemas/claims.ts` (`targetStatus` ∈ {`ZAAKCEPTOWANO`, `ODRZUCONO`, `REKLAMACJA_ZAAKCEPTOWANO`, `REKLAMACJA_ODRZUCONO`}; синтетические литералы `REKLAMACJA_*` service резолвит в **`statusBeforeReklamacja`** (откат статуса при ОБОИХ исходах), а исход пишет в `reklamacjaResolution` — см. «Update claim (verification)» ниже; **422 `REKLAMACJA_NOT_PENDING`**, если статус ≠ `REKLAMACJA`). **`OCZEKUJE_NA_AUTORYZACJE` больше НЕ является PATCH-таргетом** — в этот статус попадают только автоматически на верификации. State-machine — `apps/api/src/modules/claims/claim-state-machine.ts`, 10 легальных рёбер (рёбра в/из `OCZEKUJE_NA_AUTORYZACJE` — автоматические, driven by verify; PATCH их не принимает), 422 на любой illegal transition. **Gate CLAIM_NOT_VERIFIED:** решение (akceptacja/odmowa) ИЗ `NA_WERYFIKACJI` блокируется 422 `{code:'CLAIM_NOT_VERIFIED'}`, пока wniosek не верифицирован (`verifiedAt` не проставлен через `PATCH /verification`). Переходы ИЗ `OCZEKUJE_NA_AUTORYZACJE` и `REKLAMACJA` — НЕ gated (wniosek уже был верифицирован). **Gate CLAIM_AUTHORIZATION_REQUIRED:** решение ИЗ `NA_WERYFIKACJI` ИЛИ `OCZEKUJE_NA_AUTORYZACJE` над порогом блокируется 422 `{code:'CLAIM_AUTHORIZATION_REQUIRED'}`, пока не загружен скриншот подтверждения Maksima (`POST /claims/:nrZgl/authorization-confirmation`, `category=AUTORYZACJA_MAKSIMA`, снимающий `maksimGateClearedAt`); блокирует и accept, и reject; reklamacja-пути не gated. **Board gates (смешанный период, только `ZAAKCEPTOWANO`, [20 §0⁵](20-phase-7-eksport-weryfikator.md)):** принятие всегда пересчитывает выплату по **живой** km-доске (с сохранёнными входами и применённым `hoursAdjustedValue`) и блокируется 422 `{code:'CLAIM_BOARD_INCOMPLETE', missingDates}`, пока у активных месяцев есть незаписанные дни, и 422 `{code:'CLAIM_BOARD_CHANGED'}`, если живая dopłata отличается от сохранённой при верификации либо лежит над порогом Maksima без гейта, взведённого и снятого ровно на эту сумму (лечится повторным «Zapisz weryfikację»). Порядок: после пересчёта, до compensation-due guard. `ODRZUCONO` и рекламация этими гейтами не блокируются. | **admin / pracownik** |
+| PATCH `/claims/:nrZgl/verification` | (новое) **«Zapisz weryfikację»** — pracownik сохраняет свои корректировки ДО любого решения. Body — `VerifyClaimSchema` (только correction-поля: `dateStart`/`dateEnd`/`timeFrom`/`timeTo`/`mileage`/`hoursAdjusted`, все optional; **пустое тело легально** = «подтверждено как есть»). Ставит `verifiedAt`/`verifiedById`, при наличии корректировок пере-считывает km-calc (тот же движок, что PATCH) и перезаписывает `paymentEur` (`origPaymentEur` при этом НЕ трогается — он и есть запрошенная сумма). **Смешанный период** (есть неделя с `kmPerDay = 0` — выплата по km-доске, [20 §0⁵](20-phase-7-eksport-weryfikator.md)): пересчёт идёт **всегда**, даже с пустым телом (доска могла дописаться), с сохранёнными входами, включая применённый `hoursAdjustedValue`. Если у активных недель на доске есть незаписанные дни — `verifiedAt` ставится, корректировки и числа сохраняются (значит `ODRZUCONO` доступен), но **гейт Maksima и авто-переход статуса пропускаются в обе стороны**: статус и gate-поля не меняются, письмо Maksimu не уходит; принятие заблокировано 422 `CLAIM_BOARD_INCOMPLETE` до дозаполнения доски и повторной верификации. **Авто-переход статуса по порогу** (единственный механизм авторизации — ручного флоу нет): если итоговая dopłata СТРОГО выше `getAuthThreshold(drivenDays)`, wniosek авто-переводится `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE` (и система шлёт Maksimu письмо-подтверждение, amount-aware dedup); admin re-verify в `OCZEKUJE_NA_AUTORYZACJE`, опустивший сумму под порог, авто-откатывает статус `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI` и полностью чистит гейт. `decidedById` при авто-переходе НЕ трогается (это верификация, не решение). Повторяемо (re-verify перезаписывает; идемпотентный re-save над порогом в `OCZEKUJE` статус не трогает, re-notify только по amount-aware dedup). Авто-пересчёт выезда (`w_trasie→zjechal`) сбрасывает `verifiedAt`/`verifiedById` в NULL (данные изменились → нужна ре-верификация). 422 если статус ∉ {`NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`}; статус `OCZEKUJE_NA_AUTORYZACJE` доступен **только `admin`** (для `pracownik` — 422 `{code:'CLAIM_VERIFY_ADMIN_ONLY'}`, отличимый от статусного отказа). Audit `claim.verify`. | **admin / pracownik** |
+| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia) + разрешение рекламации. Body — discriminated union `UpdateClaimSchema` в `@magguarantee/shared/schemas/claims.ts` (`targetStatus` ∈ {`ZAAKCEPTOWANO`, `ODRZUCONO`, `REKLAMACJA_ZAAKCEPTOWANO`, `REKLAMACJA_ODRZUCONO`}; синтетические литералы `REKLAMACJA_*` service резолвит в **`statusBeforeReklamacja`** (откат статуса при ОБОИХ исходах), а исход пишет в `reklamacjaResolution` — см. «Update claim (verification)» ниже; **422 `REKLAMACJA_NOT_PENDING`**, если статус ≠ `REKLAMACJA`). **`OCZEKUJE_NA_AUTORYZACJE` больше НЕ является PATCH-таргетом** — в этот статус попадают только автоматически на верификации. State-machine — `apps/api/src/modules/claims/claim-state-machine.ts`, 10 легальных рёбер (рёбра в/из `OCZEKUJE_NA_AUTORYZACJE` — автоматические, driven by verify; PATCH их не принимает), 422 на любой illegal transition. **Gate CLAIM_NOT_VERIFIED:** решение (akceptacja/odmowa) ИЗ `NA_WERYFIKACJI` блокируется 422 `{code:'CLAIM_NOT_VERIFIED'}`, пока wniosek не верифицирован (`verifiedAt` не проставлен через `PATCH /verification`). Переходы ИЗ `OCZEKUJE_NA_AUTORYZACJE` и `REKLAMACJA` — НЕ gated (wniosek уже был верифицирован). **Gate CLAIM_AUTHORIZATION_REQUIRED:** решение ИЗ `NA_WERYFIKACJI` ИЛИ `OCZEKUJE_NA_AUTORYZACJE` над порогом блокируется 422 `{code:'CLAIM_AUTHORIZATION_REQUIRED'}`, пока не загружен скриншот подтверждения Maksima (`POST /claims/:nrZgl/authorization-confirmation`, `category=AUTORYZACJA_MAKSIMA`, снимающий `maksimGateClearedAt`); блокирует и accept, и reject; reklamacja-пути не gated. **Board gates (смешанный период, только `ZAAKCEPTOWANO`, [20 §0⁵](20-phase-7-eksport-weryfikator.md)):** принятие всегда пересчитывает выплату по **живой** km-доске (с сохранёнными входами и применённым `hoursAdjustedValue`) и блокируется 422 `{code:'CLAIM_BOARD_INCOMPLETE', missingDates}`, пока у активных недель есть незаписанные дни, и 422 `{code:'CLAIM_BOARD_CHANGED'}`, если живая dopłata отличается от сохранённой при верификации либо лежит над порогом Maksima без гейта, взведённого и снятого ровно на эту сумму (лечится повторным «Zapisz weryfikację»). Порядок: после пересчёта, до compensation-due guard. `ODRZUCONO` и рекламация этими гейтами не блокируются. | **admin / pracownik** |
 | POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` | przewoznik (own claim) |
-| GET `/claims/:nrZgl/recalc-limits/preview` | **NEW (2026-09-20)** — **dry run** пересчёта по актуальным лимитам для диалога подтверждения ([14-design-system.md](14-design-system.md) §16.6). Чистое чтение: считает тем же кодом, что POST ниже (`ClaimsService._computeLimitsRefresh`), но **ничего не пишет и аудит не пишет** (`@Audit` нет, транзакции нет). Тот же статус-гейт, что у POST — 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` приходит **до** открытия диалога. Ответ — `RecalcLimitsPreviewDto`: `{ changed: boolean, current: {...}, next: {...} }`, где обе половины — `{ kmGuaranteed, kmDifference, paymentEur, ratePerKmEffective, drivenDays }` (`RecalcLimitsPreviewSchema` / `RecalcLimitsFiguresSchema` в `packages/shared/src/schemas/claims.ts`). **Не** `ClaimDto` — записи не было, и отдавать claim-образный объект, которого нет в БД, вводило бы клиента в заблуждение. Нужен потому, что `POST /claims/:nrZgl/preview` намеренно заморожен на снимке лимитов самого wniosku, а `GET /limits` — admin-only (`pracownik` живые лимиты прочитать не может) | **admin / pracownik** |
-| POST `/claims/:nrZgl/recalc-limits` | **NEW (2026-09-20)** — пересчитать wniosek по **актуальным** `monthly_limits`, игнорируя снимок лимитов в `breakdown`. Тела нет. Перезаписывает только `kmGuaranteed/kmDifference/paymentEur/ratePerKmEffective/breakdown/drivenDays/kmPerDay`; период, пробег, статус и `orig*` не трогает; **писем не шлёт**. Если суммы сдвинулись — сбрасывает чекпоинт верификации и гейт Maksima в связке (`verifiedAt`/`maksimGate*` → NULL), чтобы выросшая доплата не проскочила мимо авторизации; идемпотентный вызов (цифры не изменились) не трогает ничего. Гейт: **только `NA_WERYFIKACJI`**, иначе 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` (сумма заморожена под авторизацию / решение принято — сначала верни wniosek на верификацию). Ответ — обновлённый `ClaimDto`. Diff «было → станет» веб получает ДО записи из `GET /claims/:nrZgl/recalc-limits/preview` (строка выше) — подтверждать необратимую правку денег постфактум нельзя. Audit `claim.limitsRefresh` (before/after) | **admin / pracownik** (пересчёт сумм — часть «Верифицировать заявление», см. [03-roles.md](03-roles.md); `weryfikator` к `/claims` доступа не имеет) |
+| GET `/claims/:nrZgl/recalc-limits/preview` | **NEW (2026-09-20)** — **dry run** пересчёта по актуальным лимитам для диалога подтверждения ([14-design-system.md](14-design-system.md) §16.6). Чистое чтение: считает тем же кодом, что POST ниже (`ClaimsService._computeLimitsRefresh`), но **ничего не пишет и аудит не пишет** (`@Audit` нет, транзакции нет). Тот же статус-гейт, что у POST — 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` приходит **до** открытия диалога. Ответ — `RecalcLimitsPreviewDto`: `{ changed: boolean, current: {...}, next: {...}, changedWeeks: [...], unchangedWeekCount: number }`, где `current`/`next` — `{ kmGuaranteed, kmDifference, paymentEur, ratePerKmEffective, drivenDays }` (`RecalcLimitsPreviewSchema` / `RecalcLimitsFiguresSchema` в `packages/shared/src/schemas/claims.ts`), а **`changedWeeks`** (с 2026-10-29) — только недели периода, у которых лимиты в снимке wniosku и актуальные различаются: `{ isoWeek, periodStart, periodEnd, current: { kmPerDay, ratePerKm, kmPerSaturday, kmInWeek }, next: { …то же } }[]` по возрастанию недели; `unchangedWeekCount` — сколько недель периода не изменилось (для строки «Pozostałe N tygodni bez zmian», [14-design-system.md](14-design-system.md) §18). **Не** `ClaimDto` — записи не было, и отдавать claim-образный объект, которого нет в БД, вводило бы клиента в заблуждение. Нужен потому, что `POST /claims/:nrZgl/preview` намеренно заморожен на снимке лимитов самого wniosku, а `GET /limits` — admin-only (`pracownik` живые лимиты прочитать не может) | **admin / pracownik** |
+| POST `/claims/:nrZgl/recalc-limits` | **NEW (2026-09-20)** — пересчитать wniosek по **актуальным** `weekly_limits`, игнорируя снимок лимитов в `breakdown`. Тела нет. Перезаписывает только `kmGuaranteed/kmDifference/paymentEur/ratePerKmEffective/breakdown/drivenDays/kmPerDay`; период, пробег, статус и `orig*` не трогает; **писем не шлёт**. Если суммы сдвинулись — сбрасывает чекпоинт верификации и гейт Maksima в связке (`verifiedAt`/`maksimGate*` → NULL), чтобы выросшая доплата не проскочила мимо авторизации; идемпотентный вызов (цифры не изменились) не трогает ничего. Гейт: **только `NA_WERYFIKACJI`**, иначе 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` (сумма заморожена под авторизацию / решение принято — сначала верни wniosek на верификацию). Ответ — обновлённый `ClaimDto`. Diff «было → станет» веб получает ДО записи из `GET /claims/:nrZgl/recalc-limits/preview` (строка выше) — подтверждать необратимую правку денег постфактум нельзя. Audit `claim.limitsRefresh` (before/after) | **admin / pracownik** (пересчёт сумм — часть «Верифицировать заявление», см. [03-roles.md](03-roles.md); `weryfikator` к `/claims` доступа не имеет) |
 | ↳ **Body** (`SubmitReklamacjaSchema`, `.strict()`) | `{ tresc: string(1..4000), kwotaReklamacji: number > 0 }` — **только** сумма + обоснование. Данные заявления рекламацией **не правятся** (correction-полей нет). | |
 | ↳ **Гейты** (порядок, первый сработавший выигрывает) | 404 (нет wniosku) → 403 (чужой wniosek) → **409 `REKLAMACJA_ALREADY_SUBMITTED`** (одна рекламация на wniosek, флаг `reklamacjaSubmitted` не сбрасывается; сюда же попадает попытка при ещё не рассмотренной рекламации) → **422 `REKLAMACJA_CLAIM_NOT_DECIDED`** (статус ∉ {`ZAAKCEPTOWANO`,`ODRZUCONO`}) → **422 `REKLAMACJA_WINDOW_EXPIRED`** (>48ч от `statusChangedAt`; `extensions.deadlineAt: ISO`; при `statusChangedAt = null` правило не применяется) → **422 `REKLAMACJA_NO_DELTA`** (`maxAmount ≤ 0`) → **422 `REKLAMACJA_AMOUNT_EXCEEDS_CAP`** (`kwotaReklamacji > maxAmount`, СТРОГО, точность до цента; `extensions.maxAmount: number`). Гейты 3-6 считает `getReklamacjaEligibility()` из `@magguarantee/shared` (`domain/reklamacja-rules.ts`) — **единственное** место, где живёт формула потолка (web-форма зовёт ту же функцию). | |
 | ↳ **Потолок** | `maxAmount = (origPaymentEur ?? paymentEur) − (status==='ZAAKCEPTOWANO' ? (amountApproved ?? 0) : 0)`. Легаси-допуск `+1 €` **убран**. Запись — атомарно в ambient `@Audit`-транзакции (`updateWithin`), ставит `reklamacjaSubmittedAt` = `statusChangedAt` (один инстанс `Date`), `statusBeforeReklamacja = status`, `status = REKLAMACJA`. Письма: `reklamacja-internal-submitted` (все активные `admin`+`pracownik`) + `reklamacja-carrier-submitted` (перевозчику). | |
-| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc`. Для pracownik / admin ответ несёт `boardSettlement` (живая помесячная km-доска смешанного периода, `null` для полностью включённого) и `boardSumKm` (Σ drove-км доски за превьюируемый период из тела запроса; `null` без машины / дат / доски); у przewoźnika обоих ключей нет | любой залогиненный (помогает заполнить форму) |
+| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc`. Для pracownik / admin ответ несёт `boardSettlement` (живая понедельная km-доска смешанного периода, `null` для полностью включённого) и `boardSumKm` (Σ drove-км доски за превьюируемый период из тела запроса; `null` без машины / дат / доски); у przewoźnika обоих ключей нет | любой залогиненный (помогает заполнить форму) |
 | GET `/claims/raw?nrZgl=...` | `getRawClaims` (admin diagnostics) | admin |
 
 ### Delegations (выезды) — `/api/v1/delegations`
@@ -686,35 +686,39 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 | Method + Path | GAS |
 |---|---|
-| GET `/limits?year=2026` | `getLimityKm` |
-| PUT `/limits/:yearMonth` | (новое) — upsert одной строки `(year, month)` от admin (`:yearMonth` = `YYYY-MM`) |
-| POST `/limits/bulk` | **NEW (2026-09-20)** — одна partial-правка на N месяцев одного года, в **одной транзакции**. Audit `limits.bulkUpdate` |
+> ⚠️ **С 2026-10-29 лимиты по неделям ISO** (было: по месяцам, `:yearMonth`). Неделя — пн–вс, принадлежит году своего четверга; ключ `YYYY-Www` (`2026-W23`, номер всегда двузначный). Помесячных эндпоинтов больше нет.
 
-> **Тело `PUT /limits/:yearMonth`** — partial: `{ kmPerDay?, ratePerKm?, kmPerSaturday? }` (все **`nonnegative`**, coerced); `refine` требует **хотя бы одно** из трёх (`UpdateMonthlyLimitSchema`). `kmPerSaturday` — км за одну зачётную нечётную субботу месяца (оценивается по `ratePerKm`, отдельной EUR-ставки нет; см. [01-overview.md](01-overview.md)). **`GET /limits?year=`** возвращает в каждой строке `kmPerSaturday: number | null` рядом с `kmPerDay`/`ratePerKm` (`MonthlyLimitDto`).
+| Method + Path | GAS |
+|---|---|
+| GET `/limits?year=2026` | `getLimityKm` — `year` = **ISO-год**; ответ — сырые строки `weekly_limits` этого года (≤ 53), по возрастанию недели. Недели без строки фронт достраивает сам (общий хелпер недель ISO из `@magguarantee/shared`) |
+| PUT `/limits/:isoWeek` | upsert одной строки `(isoYear, isoWeek)` от admin (`:isoWeek` = `YYYY-Www`). Неделя, которой нет в этом году (W53 в 52-недельном году) — 400 |
+| POST `/limits/bulk` | **NEW (2026-09-20, недели — 2026-10-29)** — одна partial-правка на N недель одного ISO-года, в **одной транзакции**. Audit `limits.bulkUpdate` |
+
+> **Тело `PUT /limits/:isoWeek`** — partial: `{ kmPerDay?, ratePerKm?, kmPerSaturday? }` (все **`nonnegative`**, coerced); `refine` требует **хотя бы одно** из трёх (`UpdateWeeklyLimitSchema`). `kmPerSaturday` — км за субботу этой недели (оценивается по `ratePerKm` той же недели, отдельной EUR-ставки нет; см. [01-overview.md](01-overview.md)). **`GET /limits?year=`** возвращает строки `WeeklyLimitDto`: `{ id, isoYear, isoWeek, kmPerDay: number | null, ratePerKm: number | null, kmPerSaturday: number | null, createdAt, updatedAt }`.
 
 > ⚠️ **Выключаемые лимиты (2026-09-20).** Значения перешли с `positive` на **`nonnegative`**, потому что у колонки теперь **три** состояния:
 >
 > | Состояние в БД | Смысл | km-calc |
 > |---|---|---|
 > | строки нет / колонка `NULL` | не сконфигурировано | глобальный fallback (540 км/дн, 0,5 €/км, 0 км/суббота) |
-> | `0` | **выключено осознанно** | месяц даёт 0 км гарантии |
+> | `0` | **выключено осознанно** | неделя даёт 0 км гарантии |
 > | `> 0` | значение | как задано |
 >
-> Ключ, **отсутствующий** в теле, колонку не трогает (это «bez zmian»); ключ со значением `0` пишет ноль. Возврата «обратно в NULL» через API нет — это делается только на уровне БД. Fallback подставляется **пополево** (строка `{kmPerDay: 300, ratePerKm: NULL}` = 300 км/дн по ставке 0,5, а не 540) — см. [19-known-quirks.md#monthlyLimit-fallback](19-known-quirks.md#monthlyLimit-fallback). **DB-CHECK на `>= 0` нет** — отрицательные отбивают только Zod-схемы, поэтому обе записи (`PUT` и `POST /bulk`) обязаны проходить через них.
+> Ключ, **отсутствующий** в теле, колонку не трогает (это «bez zmian»); ключ со значением `0` пишет ноль. Возврата «обратно в NULL» через API нет — это делается только на уровне БД. Fallback подставляется **пополево** (строка `{kmPerDay: 300, ratePerKm: NULL}` = 300 км/дн по ставке 0,5, а не 540) — см. [19-known-quirks.md#weeklyLimit-fallback](19-known-quirks.md#weeklyLimit-fallback). **DB-CHECK на `>= 0` нет** — отрицательные отбивают только Zod-схемы, поэтому обе записи (`PUT` и `POST /bulk`) обязаны проходить через них.
 
-> **Тело `POST /limits/bulk`** (`BulkUpdateMonthlyLimitsSchema`, `.strict()`):
+> **Тело `POST /limits/bulk`** (`BulkUpdateWeeklyLimitsSchema`, `.strict()`):
 >
 > ```jsonc
 > {
->   "year": 2026,              // int 2000..2100
->   "months": [1, 2, 3],       // int 1..12, непустой, без дублей
+>   "isoYear": 2026,           // int 2000..2100
+>   "weeks": [10, 11, 12],     // int 1..53, непустой, без дублей, каждая ≤ числа недель isoYear
 >   "kmPerDay": 0,             // опц., >= 0
 >   "ratePerKm": 0.52,         // опц., >= 0
 >   "kmPerSaturday": 0         // опц., >= 0
 > }
 > ```
 >
-> `refine` — **хотя бы одно** из трёх значений. Семантика полей ровно как у `PUT`: значение пишется во все выбранные месяцы (включая `0` = «выключить»), отсутствующий ключ не трогает колонку. Кросс-годовых диапазонов нет — область действия один `year`. **Ответ:** `MonthlyLimitListDto` — затронутые строки после записи, отсортированные по месяцу. Все upsert-ы + audit-строка коммитятся в **одной** транзакции (ambient-транзакция `AuditInterceptor`), поэтому частичной записи не бывает и UI достаточно success/error (см. [14-design-system.md](14-design-system.md) §16.4). Audit: `action = limits.bulkUpdate`, `targetKey = 2026-01..12` (год + первый/последний затронутый месяц), `before` = снимок затронутых строк «как было», `after` = строки после записи, `metadata.payload` = само тело запроса (интент виден даже для месяцев, у которых строки не было). Роль — `admin`.
+> `refine` — **хотя бы одно** из трёх значений. Семантика полей ровно как у `PUT`: значение пишется во все выбранные недели (включая `0` = «выключить»), отсутствующий ключ не трогает колонку. Кросс-годовых диапазонов нет — область действия один `isoYear` (выделение в UI тоже не переходит через год). **Ответ:** `WeeklyLimitListDto` — затронутые строки после записи, отсортированные по неделе. Все upsert-ы + audit-строка коммитятся в **одной** транзакции (ambient-транзакция `AuditInterceptor`), поэтому частичной записи не бывает и UI достаточно success/error (см. [14-design-system.md](14-design-system.md) §18). Audit: `action = limits.bulkUpdate`, `targetType = WeeklyLimit`, `targetKey = 2026-W10..W22` (год + первая/последняя затронутая неделя), `before` = снимок затронутых строк «как было», `after` = строки после записи, `metadata.payload` = само тело запроса (интент виден даже для недель, у которых строки не было). Старые audit-строки с `targetType = MonthlyLimit` остаются валидными для фильтра аудита. Роль — `admin`.
 
 ### Lookups (для dropdown-ов) — `/api/v1/lookups`
 
@@ -1004,7 +1008,7 @@ type PreviewResponse = {
     trailerId: string; trailerPlate: string | null;
     driverId: string; driverName: string | null;
   };
-  // ТОЛЬКО POST /claims/:nrZgl/preview для pracownik / admin: живая помесячная
+  // ТОЛЬКО POST /claims/:nrZgl/preview для pracownik / admin: живая понедельная
   // km-доска смешанного периода по превьюируемым входам; `null` для полностью
   // включённого периода. У przewoźnika (new-claim и инспекция рекламации)
   // ключа нет.
@@ -1029,7 +1033,7 @@ type PreviewResponse = {
 //                              // деплоя engine-изменения.
 //   kmGuaranteed: number,
 //   ratePerKmEffective: number,
-//   breakdown: MonthBreakdown[],
+//   breakdown: WeekBreakdown[],  // одна строка на неделю ISO периода (с 2026-10-29)
 //   daysActive: number,       // NEW 2026-09-20 — зачтённые дни, у которых есть
 //                             // гарантия: Σ [(kmPerDay > 0 ? workingDays : 0)
 //                             // + saturdaysCounted]. Легаси JSONB без ключа
@@ -1051,13 +1055,13 @@ type PreviewResponse = {
 //
 // `daysActive`/`daysTotal`/`mileageEffective`/`mileageSource` — результат
 // settlement-прохода (`packages/shared/src/domain/claim-settlement.ts`,
-// формула — docs/01-overview.md §«Расчёт доплаты»). Все месяцы периода с
+// формула — docs/01-overview.md §«Расчёт доплаты»). Все недели периода с
 // `kmPerDay > 0` ⇒ `mileageSource: 'declared'`, `mileageEffective ===
-// claim.mileage`, числа побитово как до фичи. Есть месяц с `kmPerDay = 0` ⇒
+// claim.mileage`, числа побитово как до фичи. Есть неделя с `kmPerDay = 0` ⇒
 // `mileageSource: 'board'`: против гарантии зачитывается Σ `VehicleDailyKm.km`
-// (state = drove) по зачётным дням активных месяцев. `daysActive/daysTotal`
+// (state = drove) по зачётным дням активных недель. `daysActive/daysTotal`
 // сохраняют прежний смысл (веб по ним решает, рисовать ли
-// `<GuaranteeGapNotice>`, docs/14 §16.5.3). Помесячная деталь доски в
+// `<GuaranteeGapNotice>`, docs/14 §16.5.3). Понедельная деталь доски в
 // breakdown НЕ хранится — доска живая, она отдаётся отдельно как
 // `boardSettlement`.
 //
@@ -1067,44 +1071,49 @@ type PreviewResponse = {
 //   mileageEffective: number,  // Σ доски по зачётным дням (сейчас)
 //   kmDifference: number,      // kmGuaranteed − mileageEffective (может быть < 0)
 //   paymentEur: number,        // сколько wniosek стоил бы прямо сейчас
-//   months: {
-//     yearMonth: string,       // 'YYYY-MM', по возрастанию, каждый месяц периода
+//   weeks: {
+//     isoWeek: string,         // 'YYYY-Www', по возрастанию, каждая неделя периода
 //     mode: 'active' | 'saturdaysOnly' | 'off',
-//     km: number,              // Σ drove-км по зачётным дням месяца (0 для 'off')
+//     km: number,              // Σ drove-км по зачётным дням недели (0 для 'off')
 //     daysFilled: number,      // обязательные дни, у которых есть строка (drove ИЛИ idle)
-//     daysRequired: number,    // active: каждый календарный день месяц∩период;
-//                              // saturdaysOnly: зачётные субботы; off: 0
+//     daysRequired: number,    // active: каждый календарный день неделя∩период;
+//                              // saturdaysOnly: суббота недели, если засчитана; off: 0
 //     missingDates: string[],  // обязательные дни без строки, ISO, по возрастанию
 //   }[],
-//   missingDates: string[],    // все месяцы подряд
+//   missingDates: string[],    // все недели подряд
 //   complete: boolean,         // missingDates.length === 0; false ⇒ 422
 //                              // CLAIM_BOARD_INCOMPLETE на ZAAKCEPTOWANO
 // };
-// Какие дни считаются: 'active' — любой календарный день месяца в пределах
-// периода (воскресенья, праздники EU-бана, незачётные субботы, первый и
+// Какие дни считаются: 'active' — любой календарный день недели в пределах
+// периода (воскресенье, праздники EU-бана, незачтённая суббота, первый и
 // последний день целиком — timeFrom/timeTo укорачивают гарантию, а не км);
-// 'saturdaysOnly' (kmPerDay = 0, kmPerSaturday > 0) — только зачётные субботы;
+// 'saturdaysOnly' (kmPerDay = 0, kmPerSaturday > 0) — только зачтённая суббота;
 // 'off' (0 / 0) — ничего. `idle` — заполненный день с 0 км; `drove` с
 // `km = null` — 0 км. Незаписанный день никогда не угадывается.
 //
-// Форма одной месячной строки `MonthBreakdown` (источник — `MonthBreakdownSchema`
-// в `packages/shared/src/schemas/claims.ts`):
+// Форма одной понедельной строки `WeekBreakdown` (источник — `WeekBreakdownSchema`
+// в `packages/shared/src/schemas/claims.ts`; с 2026-10-29 заменила `MonthBreakdown`,
+// совместимости со старыми помесячными JSONB нет — wnioski на проде появились позже):
 // {
-//   yearMonth: string,          // 'YYYY-MM'
+//   isoWeek: string,            // 'YYYY-Www' — ключ недели и ключ снимка лимитов
+//   weekStart: string,          // ISO-дата понедельника недели
+//   weekEnd: string,            // ISO-дата воскресенья недели
+//   periodStart: string,        // первый день недели ВНУТРИ периода wniosku
+//   periodEnd: string,          // последний день недели ВНУТРИ периода wniosku
 //   workingDays: number,        // ТОЛЬКО будни (пн–пт), после EU-ban / дробных / korekta godzin
 //   kmPerDay: number,
-//   ratePerKm: number,
-//   saturdaysCounted: number,   // зачтённые нечётные субботы (целое ≥0)
-//   kmPerSaturday: number,      // км за субботу (0 ⇒ субботняя гарантия для месяца выключена)
+//   ratePerKm: number,          // и для будней, и для субботы недели
+//   saturdaysCounted: number,   // 0 или 1 — зачтена ли суббота недели
+//   kmPerSaturday: number,      // км за субботу (0 ⇒ субботней гарантии у недели нет)
 //   kmFromSaturdays: number,    // = round(saturdaysCounted × kmPerSaturday)
-//   saturdayDays: string[],     // ISO-даты зачтённых суббот (по возрастанию)
-//   kmInMonth: number,          // ГРАНД-ТОТАЛ = round(workingDays × kmPerDay) + kmFromSaturdays
+//   saturdayDays: string[],     // ISO-дата зачтённой субботы ([] если не зачтена)
+//   kmInWeek: number,           // ГРАНД-ТОТАЛ = round(workingDays × kmPerDay) + kmFromSaturdays
 //   excludedDays: { date, label }[]  // праздники / EU-ban (выходные НЕ включаются)
 // }
-// Полное число дней месяца = workingDays + saturdaysCounted; Σ kmInMonth === kmGuaranteed.
-// Субботние поля идут с `.default(...)` (0 / []), чтобы старые persisted JSONB-строки
-// без них парсились чисто. Зачётная суббота, попавшая на EU-ban, уходит в `excludedDays`
-// (НЕ в `saturdayDays`) — не оплачивается и не считается днём.
+// Полное число дней недели = workingDays + saturdaysCounted; Σ kmInWeek === kmGuaranteed.
+// Суббота с гарантией (kmPerSaturday > 0), но НЕ зачтённая (вне периода или на EU-ban)
+// ⇔ kmPerSaturday > 0 && saturdaysCounted === 0; если она попала на EU-ban — она в
+// `excludedDays` (НЕ в `saturdayDays`) — не оплачивается и не считается днём.
 ```
 
 ### Update claim (verification)

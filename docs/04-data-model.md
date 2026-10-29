@@ -46,8 +46,8 @@
     │                   └──────────────┘                   │
     │                                                      │
     │  ┌─────────────────┐  ┌──────────────┐               │
-    │  │ MonthlyLimit    │  │  AppConfig   │               │
-    │  │ (год, месяц)    │  │ (глобальные  │               │
+    │  │ WeeklyLimit     │  │  AppConfig   │               │
+    │  │ (ISO-год, нед.) │  │ (глобальные  │               │
     │  └─────────────────┘  │  параметры)  │               │
     │                       └──────────────┘               │
     │                                                      │
@@ -310,8 +310,8 @@
 | `kmGuaranteed` | расчётный гарантированный км |
 | `kmDifference` | gwarant − mileage |
 | `paymentEur` | сумма доплаты |
-| `ratePerKmEffective` | взвешенная EUR/km по месяцам |
-| `breakdown` | JSON помесячного расчёта |
+| `ratePerKmEffective` | взвешенная EUR/km по неделям |
+| `breakdown` | JSON понедельного расчёта (с 2026-10-29; до этого — помесячного) |
 | `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` |
 | `decidedById` | FK → User (кто верифицировал) |
 | `comment`, `orderNumber`, `orderDate` | мета |
@@ -333,7 +333,7 @@
 | `hoursAdjustedValue` | currently applied korekta godzin — drives km-calc (`korektaDni = hoursAdjustedValue / 24`); верификатор PATCH может править только этот столбец, `origHoursAdjusted` остаётся неизменным |
 | `periodAdjustedByVerifier` | `Boolean @default(false)` — маркер «период (`dateStart/dateEnd`) правил pracownik». Граница авто-пересчёта: если `true`, переход выезда `→ zjechal` НЕ перетирает период. См. §0″ [20](20-phase-7-eksport-weryfikator.md) |
 
-> **`breakdown` (per-month JSON).** Каждая месячная строка несёт: `workingDays` (**теперь только будни**, пн–пт), `kmPerDay`, `ratePerKm`, `kmInMonth`, `excludedDays` и субботние поля субботней гарантии — `saturdaysCounted` (кол-во зачтённых нечётных суббот, целое ≥0), `kmPerSaturday` (км за субботу; `0` ⇒ фича для месяца выключена), `kmFromSaturdays` (= `round(saturdaysCounted × kmPerSaturday)`), `saturdayDays` (ISO-даты зачтённых суббот). Полное число дней месяца = `workingDays + saturdaysCounted`; `kmInMonth` — **гранд-тотал** = `round(workingDays × kmPerDay) + kmFromSaturdays` (Σ `kmInMonth` = `kmGuaranteed`). Зачётные субботы засчитываются как дни (`drivenDays`/`rawTotalDays`) и потому влияют на порог авторизации Максима и средний км/день. Форма — `MonthBreakdownSchema`, см. [13-api-design.md](13-api-design.md).
+> **`breakdown` (per-week JSON, с 2026-10-29).** Одна строка на каждую неделю ISO, которую задел период. Строка несёт: `isoWeek` (`YYYY-Www`, ключ снимка лимитов), `weekStart`/`weekEnd` (пн/вс полной недели), `periodStart`/`periodEnd` (дни недели внутри периода wniosku — у первой и последней недели обычно короче), `workingDays` (**только будни**, пн–пт), `kmPerDay`, `ratePerKm`, `kmInWeek`, `excludedDays` и субботние поля — `saturdaysCounted` (0 или 1: в неделе одна суббота), `kmPerSaturday` (км за субботу; `0` ⇒ субботняя гарантия недели выключена), `kmFromSaturdays` (= `round(saturdaysCounted × kmPerSaturday)`), `saturdayDays` (ISO-дата зачтённой субботы или пусто). Полное число дней недели = `workingDays + saturdaysCounted`; `kmInWeek` — **гранд-тотал** = `round(workingDays × kmPerDay) + kmFromSaturdays` (Σ `kmInWeek` = `kmGuaranteed`). Зачтённые субботы засчитываются как дни (`drivenDays`/`rawTotalDays`) и потому влияют на порог авторизации Максима и средний км/день. Форма — `WeekBreakdownSchema`, см. [13-api-design.md](13-api-design.md). Помесячных `breakdown` в БД нет: переход сделан до первого wniosku на проде, совместимость со старой формой не поддерживается.
 
 **Инварианты (data-model contract):**
 - `nrZgl` уникален глобально, генерируется атомарно через `ClaimSequence` (per `YY-MM`).
@@ -386,36 +386,37 @@
 >
 > ✅ **ВВЕДЕНО ОБРАТНО (REWORK 2026-06-20 #4, §0″ [20](20-phase-7-eksport-weryfikator.md)):** связь `Claim.delegationId` (FK, **unique**) вводится. Перевозчик подаёт wniosek на конкретный выезд (`w_trasie`/`zjechal`), период берётся из выезда, `mileage` = `Σ VehicleDailyKm` за период. При позднем `zjechal` с другой датой — авто-пересчёт периода wniosek **только в `NA_WERYFIKACJI`** (untouched); после любого решающего действия pracownik (отправка на авторизацию / решение / правка периода) — заморожен (границы — см. §0″). Это разворачивает «нет FK» (2026-06-12) и возвращает идею memory `wniosek-wyjazd-linked` (2026-06-11) в коде. `mileage` по-прежнему = `Σ VehicleDailyKm` (предзаполнение + override). Approval-workflow Аркадиуша — отдельный Phase 11, не в этом слайсе.
 
-### `MonthlyLimit` — лимиты на месяц
+### `WeeklyLimit` — лимиты на неделю ISO
 
-Двумерная таблица (год × месяц). На каждый месяц — `kmPerDay` (дневной лимит км), `ratePerKm` (ставка EUR/km) и опц. `kmPerSaturday` (км за одну зачётную субботу). Используется в расчёте `calcKmGwarantPerMonth`.
+> ⚠️ С 2026-10-29 заменяет `MonthlyLimit` (год × месяц). Причина — бизнесу нужны разные км, ставка и субботняя гарантия **по неделям**. Перенос данных и удаление старой таблицы — [17-migration-roadmap.md](17-migration-roadmap.md) «Доработка (2026-10-29)».
+
+Таблица (ISO-год × неделя ISO). Неделя — пн–вс, номера 1–52/53, принадлежит году своего четверга. На каждую неделю — `kmPerDay` (дневной лимит км для пн–пт), `ratePerKm` (ставка EUR/km — и для будней, и для субботы этой недели) и опц. `kmPerSaturday` (км за субботу этой недели). Используется в расчёте `calcKmGwarant`.
 
 | Поле |
 |---|
-| `year` |
-| `month` (1..12) |
+| `isoYear` (год недели ISO — может отличаться от календарного года её понедельника) |
+| `isoWeek` (1..53; 53 бывает не каждый год) |
 | `kmPerDay` |
 | `ratePerKm` |
 | `kmPerSaturday` (опц.) |
 
-**Трёхзначная семантика значений (2026-09-20).** На админском листе лимитов (`/employee/limits`) есть чекбоксы «gwarancja włączona» и «soboty»; при снятии галки в БД пишется `0`. Раньше `0` был невозможен (Zod `.positive()`), теперь `NULL` и `0` — **разные бизнес-состояния**, и разница несёт деньги:
+**Трёхзначная семантика значений (2026-09-20, перенесена на недели без изменений).** На админском листе лимитов (`/employee/limits`) у каждого значения есть чекбокс «włączona»; при снятии галки в БД пишется `0`. `NULL` и `0` — **разные бизнес-состояния**, и разница несёт деньги:
 
 | Значение в БД | Смысл | Что делает km-calc |
 |---|---|---|
-| строки нет / `NULL` | месяц не сконфигурирован | fallback: `AppConfig.km_dziennie_default` (540) и `AppConfig.stawka_eur_default` (0.5); для суббот — `0` |
-| `0` | гарантия осознанно выключена администратором | `0` км за этот месяц |
+| строки нет / `NULL` | неделя не сконфигурирована | fallback: `AppConfig.km_dziennie_default` (540) и `AppConfig.stawka_eur_default` (0.5); для субботы — `0` |
+| `0` | гарантия осознанно выключена администратором | `0` км за эту неделю |
 | `> 0` | заданное значение | как задано |
 
 Отсюда:
 
-- **Существование строки `MonthlyLimit` — единственный признак того, что администратор осознанно сконфигурировал месяц.** Отсутствующий месяц **не** выключен: он получает fallback 540 / 0.5 (wniosek не отклоняется и предупреждения не показываются — см. [19-known-quirks.md](19-known-quirks.md#monthlyLimit-fallback)).
+- **Существование строки `WeeklyLimit` — единственный признак того, что администратор осознанно сконфигурировал неделю.** Отсутствующая неделя **не** выключена: она получает fallback 540 / 0.5 (wniosek не отклоняется и предупреждения не показываются — см. [19-known-quirks.md](19-known-quirks.md#weeklyLimit-fallback)).
 - **Fallback владеет API** (`km-calc.service.ts`), а не БД: `@default` на колонках нет и добавлять нельзя — иначе `NULL` перестанет отличаться от `0`.
-- Fallback подставляется **пополево**: строка с `kmPerDay = 0` и `ratePerKm = NULL` даёт 0 км по ставке 0.5 €/км (раньше такая строка отбрасывалась целиком, и месяц получал полный fallback).
-- Миграции под это изменение **нет** — DDL прежний (nullable, без `@default`), поменялась только интерпретация. См. [12-database-schema.md](12-database-schema.md) §«LIMITY KM → MonthlyLimit».
+- Fallback подставляется **пополево**: строка с `kmPerDay = 0` и `ratePerKm = NULL` даёт 0 км по ставке 0.5 €/км.
 
-`kmPerSaturday` — километры за **одну зачётную нечётную субботу**; оцениваются по существующей месячной ставке `ratePerKm` (отдельной EUR-ставки нет). Здесь — в отличие от `kmPerDay` — `NULL` и `0` поведенчески **идентичны**: обе ⇒ субботняя гарантия для месяца выключена (субботний fallback и так `0`, считается в km-calc-слое, **не** в БД). Опт-ин помесячный — суббота даёт км и день только при `kmPerSaturday > 0`. См. шаг «зачётные нечётные субботы» в [01-overview.md](01-overview.md).
+`kmPerSaturday` — километры за **субботу этой недели**; оцениваются по ставке `ratePerKm` той же недели (отдельной EUR-ставки нет). Здесь — в отличие от `kmPerDay` — `NULL` и `0` поведенчески **идентичны**: обе ⇒ суббота недели не оплачивается (субботний fallback и так `0`, считается в km-calc-слое, **не** в БД). Какие субботы платятся, решает админ значением по неделям — правила «нечётных суббот месяца», действовавшего до 2026-10-29, больше нет. См. шаг 4 расчёта в [01-overview.md](01-overview.md).
 
-**Инвариант:** unique `(year, month)`.
+**Инвариант:** unique `(isoYear, isoWeek)`; `isoWeek` ≤ числа недель в `isoYear` (52 или 53) — проверяется в api/Zod, не в БД.
 
 ### `AppConfig` — глобальные параметры
 
@@ -423,13 +424,13 @@ Key-value хранилище для всех бизнес-параметров, 
 
 | Ключ | Значение | Описание |
 |---|---|---|
-| `stawka_eur_default` | `0.5` | EUR/km, fallback (если `MonthlyLimit.ratePerKm` для (year, month) отсутствует или `NULL` — но **не** если он `0`) |
-| `km_dziennie_default` | `540` | km/день, fallback (если `MonthlyLimit.kmPerDay` для (year, month) отсутствует или `NULL` — но **не** если он `0`: `0` = гарантия выключена) |
+| `stawka_eur_default` | `0.5` | EUR/km, fallback (если `WeeklyLimit.ratePerKm` для (isoYear, isoWeek) отсутствует или `NULL` — но **не** если он `0`) |
+| `km_dziennie_default` | `540` | km/день, fallback (если `WeeklyLimit.kmPerDay` для (isoYear, isoWeek) отсутствует или `NULL` — но **не** если он `0`: `0` = гарантия выключена) |
 | `min_days_to_submit` | `10` | минимум дней до подачи |
 | `login_code_ttl` | `600` | секунд — время жизни 2FA-кода |
 | `login_max_attempts` | `5` | максимум попыток ввода кода |
 
-> **Authorization threshold ≠ AppConfig.** Порог авторизации зависит от количества дней в трассе, а не от суммы (см. legacy `getAuthThreshold(drivenDays)` — 1000 EUR при ≥61 дне, 800 при ≥31, 500 при ≥16, 300 при 10–15). Эти константы пока зашиты в коде; backlog — вынести в новую таблицу `AuthThresholds` или поля `MonthlyLimit`. Подробности в [19-known-quirks.md](19-known-quirks.md).
+> **Authorization threshold ≠ AppConfig.** Порог авторизации зависит от количества дней в трассе, а не от суммы (см. legacy `getAuthThreshold(drivenDays)` — 1000 EUR при ≥61 дне, 800 при ≥31, 500 при ≥16, 300 при 10–15). Эти константы пока зашиты в коде; backlog — вынести в новую таблицу `AuthThresholds`. Подробности в [19-known-quirks.md](19-known-quirks.md).
 
 ### `AuditLog` — аудит
 
