@@ -494,7 +494,7 @@ export function DelegationDetailModal({
   // Shows the CURRENT `Vehicle.dispatchTeam` (live, not a snapshot). Omitted
   // entirely when there is no resolvable vehicle (per §6.4 "empty section
   // omitted"). When the vehicle exists but carries no team → the «Brak zespołu
-  // prowadzącego» amber box.
+  // dyspozytorów» amber box.
   //
   // NOTE: until the DelegationDto vehicle mini is widened with `dispatchTeam`
   // (api follow-up), `currentTeam` is `undefined` and the block is omitted —

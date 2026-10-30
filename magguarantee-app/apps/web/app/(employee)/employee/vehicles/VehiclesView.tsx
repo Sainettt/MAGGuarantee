@@ -191,11 +191,7 @@ export default function VehiclesView() {
       {
         id: 'dispatchTeam',
         header: t('fields.dispatchTeam'),
-        cell: (row) => (
-          <span className="font-mono tabular-nums">
-            {row.dispatchTeam?.code ?? '—'}
-          </span>
-        ),
+        cell: (row) => row.dispatchTeam?.name ?? '—',
       },
       {
         id: 'type',

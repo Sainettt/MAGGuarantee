@@ -651,7 +651,6 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
         dispatchTeamId: 'team-99',
         dispatchTeam: {
           id: 'team-99',
-          code: '1.1.13',
           name: 'Zespół Nocny',
           active: true,
           dispatchers: [
@@ -667,7 +666,6 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
     const out = await service.getOne(auth('admin', 'admin-1'), 'deleg-1');
     expect(out.vehicle?.dispatchTeam).toEqual({
       id: 'team-99',
-      code: '1.1.13',
       name: 'Zespół Nocny',
       active: true,
       dispatchers: [

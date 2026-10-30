@@ -5987,6 +5987,8 @@ A NEW namespace `myKm.*` for this tab's chrome. All grid/cell/nav/history/tiles 
 
 ## Phase 11 — `<TeamMembers>` (team composition) (NEW — AUTHORITATIVE 2026-06-17)
 
+> **2026-10-29 — single `name`.** `Team.code` (N.N.N) + optional `Team.name` were collapsed into ONE required, unique, free-form `name` («Nazwa zespołu» — usually the MAGTRANS number, e.g. `1.23`; no format enforced). The identity line is now a single **name chip** (`inline-flex items-center rounded-md bg-input px-1.5 py-0.5 font-semibold text-text`, no mono / `tabular-nums`) + the inactive badge; the prop `showCode` became `showName` with the same dedup rule (a host that prints the name itself hides the chip; the inactive badge still renders). Everywhere below, read "code chip + name" as "name chip". The admin tab and the vehicle field are labelled «Zespół dyspozytorów» / "Dispatch team" — «ZESPÓŁ PROWADZĄCY» (§7.9.7, the delegation block) keeps its name because it shows the full crew (dispatch team + planista).
+
 > **Status:** ✅ Locked. This formalises the **single reusable component** that renders a dispatch team's
 > identity (code + name) and its member dispatchers, wherever a team is shown across the app. It replaces the
 > ad-hoc "list the dispatchers inline" rendering that would otherwise drift between the vehicle form, the three
@@ -6074,8 +6076,7 @@ circle is decorative; the **name text beside it is the accessible label**, so th
 ```ts
 interface TeamMembersProps {
   team: {
-    code: string;                 // "1.1.13" — 3 dot-segments, mono code-chip
-    name: string | null;          // Team.name — text-text, omitted-no-gap if null
+    name: string;                 // Team.name — «Nazwa zespołu», the single identifier (name chip)
     active: boolean;              // false → muted «Nieaktywny» badge + opacity-70 dim
     members: Array<{
       id: string;
@@ -6085,7 +6086,7 @@ interface TeamMembersProps {
   };
   variant?: 'chips' | 'list';     // default 'chips'
   size?: 'sm' | 'md';             // default 'md'
-  showCode?: boolean;             // default true — host may suppress a DUPLICATE code only
+  showName?: boolean;             // default true — host may suppress a DUPLICATE name only
   className?: string;
 }
 ```

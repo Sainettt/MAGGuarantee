@@ -28,7 +28,7 @@ import { TeamsRepository, type TeamRow } from './teams.repository';
  * replaces the legacy single `Vehicle.dispatcherId`. Maintained by `admin`.
  *
  * Invariants enforced here (per docs/04-data-model.md):
- *   - `code` is globally UNIQUE (`^\d+\.\d+\.\d+$` validated at Zod) — P2002 → 409.
+ *   - `name` («Nazwa zespołu», the single identifier) is globally UNIQUE — P2002 → 409.
  *   - dispatcher membership: each assigned user must be an ACTIVE `dyspozytor`
  *     (422 otherwise). Re-assigning a dispatcher already on another team is a
  *     SILENT move (just overwrites `User.teamId`) — audited, no 422.
@@ -61,14 +61,13 @@ export class TeamsService {
     let row: TeamRow;
     try {
       row = await this.repo.create({
-        code: dto.code,
-        name: dto.name ?? null,
+        name: dto.name,
         active: dto.active ?? true,
       });
     } catch (err) {
       throw uniqueViolationToConflict(
         err,
-        'Zespół o tym kodzie już istnieje',
+        'Zespół o tej nazwie już istnieje',
       );
     }
 
@@ -90,7 +89,6 @@ export class TeamsService {
     let row: TeamRow;
     try {
       row = await this.repo.update(id, {
-        ...(dto.code !== undefined ? { code: dto.code } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
       });
@@ -98,7 +96,7 @@ export class TeamsService {
       if (isPrismaUniqueViolation(err)) {
         throw uniqueViolationToConflict(
           err,
-          'Zespół o tym kodzie już istnieje',
+          'Zespół o tej nazwie już istnieje',
         );
       }
       throw err;
@@ -179,7 +177,6 @@ export class TeamsService {
     const rows = await this.repo.list({});
     return rows.map((r) => ({
       id: r.id,
-      code: r.code,
       name: r.name,
       active: r.active,
       dispatchers: r.dispatchers.map((d) => ({
@@ -262,7 +259,6 @@ export class TeamsService {
   toDto(row: TeamRow): TeamDto {
     return {
       id: row.id,
-      code: row.code,
       name: row.name,
       active: row.active,
       dispatchers: row.dispatchers.map((d) => ({

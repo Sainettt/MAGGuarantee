@@ -133,7 +133,7 @@ export const ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
 export const PATH_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
   // Catalog of trailer types — admin only (docs/03-roles.md).
   '/employee/trailer-types': ['trailer_types.manage'],
-  // Phase 11 — «Zespoły prowadzące» (dispatch-team CRUD).
+  // Phase 11 — «Zespoły dyspozytorów» (dispatch-team CRUD).
   '/employee/teams': ['teams.manage'],
   // Phase 4.5 — ops surfaces (users CRUD 4.4; limits / audit / diagnostics
   // 4.5). Each renders behind the `(admin)` layout + its own page check too.

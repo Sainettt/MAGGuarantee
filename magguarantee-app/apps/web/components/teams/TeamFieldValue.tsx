@@ -9,7 +9,7 @@
 // DelegationDetailModal «Notatki» fullWidth pattern — then either:
 //   • <TeamMembers> when a team is assigned (it owns the members / empty-team /
 //     inactive states), or
-//   • the «Brak zespołu prowadzącego» amber box when the vehicle has NO team
+//   • the «Brak zespołu dyspozytorów» amber box when the vehicle has NO team
 //     (no team object exists, so the empty-members box can't be used — §7.9.7).
 
 import { AlertTriangle } from 'lucide-react';

@@ -112,13 +112,14 @@ const SEED_USERS: SeedUser[] = [
 //   - `9.9.9`  — intentionally empty (no dispatchers) to exercise the UI's
 //     "Brak dyspozytorów" state.
 // `Team` uses an `active` flag, not soft-delete (see docs/04-data-model.md).
+// A team has ONE identifier, `name` («Nazwa zespołu», 2026-10-29) — the demo
+// names just keep the MAGTRANS numbering convention.
 
-const DEMO_TEAM_CODE = '1.1.13';
-const EMPTY_TEAM_CODE = '9.9.9';
+const DEMO_TEAM_NAME = '1.1.13';
+const EMPTY_TEAM_NAME = '9.9.9';
 
 type SeedTeam = {
-  code: string;
-  name: string | null;
+  name: string;
   active: boolean;
   // dispatcher logins (must exist in SEED_USERS with role=dyspozytor)
   dispatcherLogins: string[];
@@ -126,14 +127,12 @@ type SeedTeam = {
 
 const SEED_TEAMS: SeedTeam[] = [
   {
-    code: DEMO_TEAM_CODE,
-    name: 'Zespół DAF 1.1.13',
+    name: DEMO_TEAM_NAME,
     active: true,
     dispatcherLogins: ['dyspozytor1', 'dyspozytor2', 'dyspozytorlider1'],
   },
   {
-    code: EMPTY_TEAM_CODE,
-    name: null,
+    name: EMPTY_TEAM_NAME,
     active: true,
     dispatcherLogins: [],
   },
@@ -282,11 +281,11 @@ async function seedUsers(passwordHash: string): Promise<number> {
 
 async function seedTeams(): Promise<number> {
   for (const t of SEED_TEAMS) {
-    // Upsert the team by its unique code → idempotent.
+    // Upsert the team by its unique name → idempotent.
     const team = await prisma.team.upsert({
-      where: { code: t.code },
-      create: { code: t.code, name: t.name, active: t.active },
-      update: { name: t.name, active: t.active },
+      where: { name: t.name },
+      create: { name: t.name, active: t.active },
+      update: { active: t.active },
     });
 
     // Assign / re-assign the team's dispatchers (User.teamId). Set-once per
@@ -326,7 +325,7 @@ async function seedDemoFleet(): Promise<DemoFleet> {
     where: { login: DEMO_VEHICLE_PLANNER_LOGIN },
   });
   const demoTeam = await prisma.team.findUniqueOrThrow({
-    where: { code: DEMO_TEAM_CODE },
+    where: { name: DEMO_TEAM_NAME },
   });
 
   // Carrier extends przewoznik1 (1:1 on userId). Only DB-NOT-NULL fields are
@@ -891,13 +890,13 @@ function printBanner(
     console.log(`  - ${login}   ${email}   role=${u.role}${tags.length ? ` (${tags.join(', ')})` : ''}`);
   }
   const demoTeamDispatcherCount =
-    SEED_TEAMS.find((t) => t.code === DEMO_TEAM_CODE)?.dispatcherLogins.length ?? 0;
+    SEED_TEAMS.find((t) => t.name === DEMO_TEAM_NAME)?.dispatcherLogins.length ?? 0;
   console.log(`Seeded AppConfig:   ${configCount} keys`);
   console.log(`Seeded TrailerType: ${trailerTypeCount} entries`);
   console.log(
     `Seeded Team:        ${teamCount} teams ` +
-      `(${DEMO_TEAM_CODE}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazdy, ` +
-      `${EMPTY_TEAM_CODE}=pusty)`,
+      `(${DEMO_TEAM_NAME}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazdy, ` +
+      `${EMPTY_TEAM_NAME}=pusty)`,
   );
   console.log(
     `Seeded Carrier:     2 (${DEMO_CARRIER_USER_LOGIN} z flotą; ${DOCUMENTS_CARRIER_USER_LOGIN} bez floty — docs/25 B6)`,

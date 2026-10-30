@@ -459,7 +459,6 @@ export class DelegationsRepository {
           dispatchTeam: {
             select: {
               id: true,
-              code: true,
               name: true,
               active: true,
               dispatchers: {
@@ -514,7 +513,6 @@ export class DelegationsRepository {
             dispatchTeam: row.vehicle.dispatchTeam
               ? {
                   id: row.vehicle.dispatchTeam.id,
-                  code: row.vehicle.dispatchTeam.code,
                   name: row.vehicle.dispatchTeam.name,
                   active: row.vehicle.dispatchTeam.active,
                   dispatchers: (
@@ -590,8 +588,7 @@ interface DelegationPrismaShape {
     dispatchTeamId: string | null;
     dispatchTeam?: {
       id: string;
-      code: string;
-      name: string | null;
+      name: string;
       active: boolean;
       dispatchers?: { id: string; name: string | null; login: string }[];
     } | null;

@@ -12,8 +12,7 @@ const NOW = new Date('2026-06-17T10:00:00.000Z');
 function makeTeam(overrides: Partial<TeamRow> = {}): TeamRow {
   return {
     id: 't-1',
-    code: '1.1.13',
-    name: 'Zespół 1.1.13',
+    name: '1.1.13',
     active: true,
     dispatchers: [],
     vehicleCount: 0,
@@ -60,18 +59,18 @@ function makeRepo(opts: {
 
   const repo = {
     findById: jest.fn(async (id: string) => teams.get(id) ?? null),
-    findByCode: jest.fn(async (code: string) =>
-      [...teams.values()].find((t) => t.code === code) ?? null,
+    findByName: jest.fn(async (name: string) =>
+      [...teams.values()].find((t) => t.name === name) ?? null,
     ),
     list: jest.fn(async () => [...teams.values()]),
-    create: jest.fn(async (data: { code: string; name?: string | null }) => {
-      if ([...teams.values()].some((t) => t.code === data.code)) {
+    create: jest.fn(async (data: { name: string }) => {
+      if ([...teams.values()].some((t) => t.name === data.name)) {
         throw Object.assign(new Error('P2002'), {
           code: 'P2002',
-          meta: { target: ['code'] },
+          meta: { target: ['name'] },
         });
       }
-      const row = makeTeam({ id: `t-${teams.size + 1}`, code: data.code, name: data.name ?? null });
+      const row = makeTeam({ id: `t-${teams.size + 1}`, name: data.name });
       teams.set(row.id, row);
       return row;
     }),
@@ -102,16 +101,16 @@ describe('TeamsService.create', () => {
       dispatchers: [{ id: 'd-1', role: 'dyspozytor', active: true, teamId: null }],
     });
     const svc = new TeamsService(repo);
-    const out = await svc.create({ code: '2.2.2', dispatcherIds: ['d-1'] });
-    expect(out.code).toBe('2.2.2');
+    const out = await svc.create({ name: '2.2.2', dispatcherIds: ['d-1'] });
+    expect(out.name).toBe('2.2.2');
     // d-1 was pointed at the new team.
     expect(members[out.id]).toEqual(['d-1']);
   });
 
-  it('translates a duplicate code into 409', async () => {
-    const { repo } = makeRepo({ teams: [makeTeam({ id: 't-1', code: '1.1.13' })] });
+  it('translates a duplicate name into 409', async () => {
+    const { repo } = makeRepo({ teams: [makeTeam({ id: 't-1', name: '1.1.13' })] });
     const svc = new TeamsService(repo);
-    await expect(svc.create({ code: '1.1.13' })).rejects.toBeInstanceOf(
+    await expect(svc.create({ name: '1.1.13' })).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
@@ -122,7 +121,7 @@ describe('TeamsService.create', () => {
     });
     const svc = new TeamsService(repo);
     await expect(
-      svc.create({ code: '3.3.3', dispatcherIds: ['d-x'] }),
+      svc.create({ name: '3.3.3', dispatcherIds: ['d-x'] }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(repo.create).not.toHaveBeenCalled();
   });
@@ -133,18 +132,18 @@ describe('TeamsService.create', () => {
     });
     const svc = new TeamsService(repo);
     await expect(
-      svc.create({ code: '3.3.3', dispatcherIds: ['d-1'] }),
+      svc.create({ name: '3.3.3', dispatcherIds: ['d-1'] }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('silently moves a dispatcher already on another team (no 422)', async () => {
     const { repo, members } = makeRepo({
-      teams: [makeTeam({ id: 't-old', code: '0.0.0' })],
+      teams: [makeTeam({ id: 't-old', name: '0.0.0' })],
       dispatchers: [{ id: 'd-1', role: 'dyspozytor', active: true, teamId: 't-old' }],
       members: { 't-old': ['d-1'] },
     });
     const svc = new TeamsService(repo);
-    const out = await svc.create({ code: '4.4.4', dispatcherIds: ['d-1'] });
+    const out = await svc.create({ name: '4.4.4', dispatcherIds: ['d-1'] });
     // Moved to the new team; detached from the old.
     expect(members[out.id]).toEqual(['d-1']);
     expect(members['t-old']).toEqual([]);
@@ -154,7 +153,7 @@ describe('TeamsService.create', () => {
 describe('TeamsService.update — membership sync', () => {
   it('replaces the roster: detaches dropped, attaches added', async () => {
     const { repo, members } = makeRepo({
-      teams: [makeTeam({ id: 't-1', code: '1.1.13' })],
+      teams: [makeTeam({ id: 't-1', name: '1.1.13' })],
       dispatchers: [
         { id: 'd-1', role: 'dyspozytor', active: true, teamId: 't-1' },
         { id: 'd-2', role: 'dyspozytor', active: true, teamId: null },
@@ -169,12 +168,29 @@ describe('TeamsService.update — membership sync', () => {
 
   it('leaves membership untouched when dispatcherIds is omitted', async () => {
     const { repo, setUserTeam } = makeRepo({
-      teams: [makeTeam({ id: 't-1', code: '1.1.13' })],
+      teams: [makeTeam({ id: 't-1', name: '1.1.13' })],
       members: { 't-1': ['d-1'] },
     });
     const svc = new TeamsService(repo);
-    await svc.update('t-1', { name: 'Nowa nazwa' });
+    const out = await svc.update('t-1', { name: 'Nowa nazwa' });
+    expect(out.name).toBe('Nowa nazwa');
     expect(setUserTeam).not.toHaveBeenCalled();
+  });
+
+  it('translates a duplicate name into 409 on rename', async () => {
+    const { repo } = makeRepo({
+      teams: [makeTeam({ id: 't-1', name: '1.1.13' })],
+    });
+    (repo.update as jest.Mock).mockRejectedValueOnce(
+      Object.assign(new Error('P2002'), {
+        code: 'P2002',
+        meta: { target: ['name'] },
+      }),
+    );
+    const svc = new TeamsService(repo);
+    await expect(svc.update('t-1', { name: '9.9.9' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('404 on a missing team', async () => {
@@ -244,7 +260,7 @@ describe('TeamsService.lookup', () => {
       teams: [
         makeTeam({
           id: 't-1',
-          code: '1.1.13',
+          name: '1.1.13',
           dispatchers: [
             { id: 'd-1', name: 'D One', login: 'd1', active: true },
             { id: 'd-2', name: null, login: 'd2', active: false },
@@ -257,8 +273,7 @@ describe('TeamsService.lookup', () => {
     expect(out).toEqual([
       {
         id: 't-1',
-        code: '1.1.13',
-        name: 'Zespół 1.1.13',
+        name: '1.1.13',
         active: true,
         dispatchers: [
           { id: 'd-1', name: 'D One', login: 'd1', active: true },

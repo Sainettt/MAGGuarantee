@@ -1,5 +1,5 @@
 // Phase 11 — Typed API wrappers for /api/v1/teams/* (admin CRUD) and the
-// /api/v1/lookups/teams dropdown. A `Team` is a numbered dispatch team
+// /api/v1/lookups/teams dropdown. A `Team` is a dispatch team («zespół dyspozytorów»)
 // (code like `1.1.13`) that vehicles are assigned to; every dispatcher in the
 // team sees the vehicle. Maintained by `admin`.
 //

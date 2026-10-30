@@ -113,18 +113,17 @@ describe('scrubForAudit', () => {
       expect(out[key]).toBe('value');
     });
 
-    it('keeps team / stanowisko codes readable in realistic audit payloads', () => {
+    it('keeps team names / stanowisko codes readable in realistic audit payloads', () => {
       const team = {
         id: 't-1',
-        code: '1.1.13',
-        name: 'Zespół A',
+        name: '1.1.13',
         dispatchers: [{ id: 'd-1', name: 'Jan', login: 'jan' }],
       };
       const vehicle = {
         id: 'v-1',
         plateNumber: 'WGM1234',
         fuelCardPin: '4321',
-        dispatchTeam: { id: 't-1', code: '1.1.13' },
+        dispatchTeam: { id: 't-1', name: '1.1.13' },
       };
       const mapping = { code: 'PLANISTA', name: 'Planista', role: 'planista' };
 

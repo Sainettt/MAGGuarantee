@@ -175,7 +175,7 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'Settings2',
     permission: 'trailer_types.manage',
   },
-  // Phase 11 — admin «Zespoły prowadzące» (dispatch-team CRUD). Replaces the
+  // Phase 11 — admin «Zespoły dyspozytorów» (dispatch-team CRUD). Replaces the
   // external "raport DAF" Excel; vehicles are assigned to a team, every
   // dispatcher in the team sees them.
   {

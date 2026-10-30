@@ -507,7 +507,6 @@ export class VehiclesRepository {
       dispatchTeam: {
         select: {
           id: true,
-          code: true,
           name: true,
           active: true,
           dispatchers: {
@@ -574,7 +573,6 @@ export class VehiclesRepository {
       dispatchTeam: row.dispatchTeam
         ? {
             id: row.dispatchTeam.id,
-            code: row.dispatchTeam.code,
             name: row.dispatchTeam.name,
             active: row.dispatchTeam.active,
             dispatchers: (row.dispatchTeam.dispatchers ?? []).map((d) => ({
@@ -664,8 +662,7 @@ interface VehiclePrismaShape {
   dispatchTeamId: string | null;
   dispatchTeam?: {
     id: string;
-    code: string;
-    name: string | null;
+    name: string;
     active: boolean;
     dispatchers?: { id: string; name: string | null; login: string }[];
   } | null;
