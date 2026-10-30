@@ -975,7 +975,7 @@ model Claim {
   /// Maksim authorization email. Nullable: pre-existing rows have no snapshot.
   origPaymentEur     Decimal? @db.Decimal(12, 2)
   ratePerKmEffective Decimal  @db.Decimal(6, 4) // weighted EUR/km
-  breakdown          Json? // monthly breakdown (totalDays, kmGwarant, stawka, ...)
+  breakdown          Json? // km-calc snapshot, one row per ISO week (KmCalcBreakdownSchema in shared)
 
   // status & workflow
   status          ClaimStatus @default(NA_WERYFIKACJI)
@@ -1458,75 +1458,18 @@ model VehiclePlannerAssignment {
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────
 
-// SUPERSEDED by WeeklyLimit (2026-10-29): still read by the api until stage 3,
-// dropped by its own migration in stage 5 (docs/17 «Доработка (2026-10-29)»).
-//
-// Per-month guarantee configuration, keyed by (year, month).
-//
-// THREE-VALUED SEMANTICS of `kmPerDay` / `ratePerKm` / `kmPerSaturday`
-// (2026-09-20 — the admin limits sheet `/employee/limits` grew "gwarancja
-// włączona" / "soboty" checkboxes that write `0` when unticked; until then `0`
-// was impossible, Zod had `.positive()`). NULL and `0` are now DIFFERENT
-// business states and the difference carries money:
-//
-//   no row / NULL → month NOT configured → the api substitutes a fallback
-//                   (540 km/day, 0.5 EUR/km; for Saturdays — 0)
-//   0             → guarantee deliberately switched OFF by an admin
-//                   → 0 km credited for that month
-//   > 0           → the configured value, used as-is
-//
-// Consequences worth spelling out:
-//
-//   1. The EXISTENCE of the row is the only signal that an admin consciously
-//      configured the month. A month with no row is NOT "off" — it gets the
-//      540 / 0.5 fallback.
-//   2. The fallback is owned by the api (`km-calc.service.ts` `_loadMonthly-
-//      Limits` + `resolveMonthLimit`), NOT by the DB. These columns have NO
-//      `@default` and must never get one: a default would make NULL
-//      indistinguishable from `0` and silently flip "not configured" into
-//      "guarantee off" (and back) — see docs/12 §"LIMITY KM → MonthlyLimit".
-//   3. `_loadMonthlyLimits` substitutes the fallback PER FIELD. Previously a
-//      row with any NULL in `kmPerDay`/`ratePerKm` was dropped whole and the
-//      month fell back entirely; now a partially filled row keeps the fields
-//      that are set (e.g. `kmPerDay = 0` + `ratePerKm = NULL` ⇒ 0 km priced at
-//      the 0.5 fallback rate).
-//
-// NO MIGRATION backs this note — the DDL (nullable, no default) already
-// allowed `0`; only the meaning of the stored values changed.
-model MonthlyLimit {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  year          Int
-  month         Int // 1..12
-  // NULL = month not configured → api fallback 540 km/day. `0` = guarantee
-  // consciously OFF for the month (admin unticked "gwarancja włączona") ⇒ 0 km.
-  kmPerDay      Decimal? @db.Decimal(8, 2)
-  // NULL = not configured → api fallback 0.5 EUR/km. `0` = priced at zero, a
-  // deliberate admin choice — not "unset".
-  ratePerKm     Decimal? @db.Decimal(6, 4)
-  // Guarantee km credited for a single qualifying ("odd") Saturday. Unlike
-  // `kmPerDay`, here NULL and `0` are behaviourally IDENTICAL — both mean the
-  // feature is off for that month (the Saturday fallback is 0 anyway), so the
-  // "soboty" checkbox writes `0` purely to make the intent explicit in the UI.
-  // Same precision as `kmPerDay` (Decimal(8,2); km is Decimal, never Float).
-  kmPerSaturday Decimal? @db.Decimal(8, 2)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([year, month])
-  @@map("monthly_limits")
-}
-
-// Per-ISO-week guarantee configuration, keyed by (isoYear, isoWeek) — replaces
-// MonthlyLimit from 2026-10-29 (docs/17 «Доработка (2026-10-29)»).
+// Per-ISO-week guarantee configuration, keyed by (isoYear, isoWeek): the
+// guarantee km/day (Mon–Fri), the EUR/km rate and the Saturday km of one week.
+// The only limits table — the km-calc engine prices every claim week by week.
 //
 // ISO 8601 week: Monday–Sunday, numbered 1..52/53, belongs to the year of its
 // THURSDAY — so `isoYear` differs from the calendar year of the Monday for
 // W01 / W52 / W53 at the year boundary (2026-W01 = 29.12.2025–04.01.2026).
 // `isoWeek ≤ weeks in isoYear` (52 or 53) is checked by the api / Zod, not here.
 //
-// THREE-VALUED SEMANTICS — unchanged from MonthlyLimit (2026-09-20), now per
-// week:
+// THREE-VALUED SEMANTICS (since 2026-09-20 — the admin limits sheet
+// `/employee/limits` writes `0` when a "włączona" checkbox is unticked). NULL
+// and `0` are DIFFERENT business states and the difference carries money:
 //
 //   no row / NULL → week NOT configured → the api substitutes a fallback
 //                   (540 km/day, 0.5 EUR/km; for the Saturday — 0)
@@ -1545,9 +1488,10 @@ model MonthlyLimit {
 //      NULL` ⇒ 0 km priced at the 0.5 fallback rate. A row with all three
 //      columns NULL is equivalent to no row.
 //
-// Rows that existed before 2026-10-29 were unrolled from `monthly_limits` by
-// migration 20261029120000_weekly_limits (pure SQL, rules in docs/12 «Перенос
-// `monthly_limits` → `weekly_limits`»).
+// History: limits were per calendar month (`monthly_limits`) until 2026-10-29.
+// Migration 20261029120000_weekly_limits unrolled those rows into ISO weeks
+// (pure SQL, rules in docs/12 «Перенос `monthly_limits` → `weekly_limits`»);
+// 20261030120000_drop_monthly_limits then dropped the monthly table.
 model WeeklyLimit {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   isoYear       Int // ISO week-numbering year (≠ calendar year of the Monday for W01/W52/W53)

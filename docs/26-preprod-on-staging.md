@@ -522,6 +522,42 @@ UptimeRobot / Better Stack на `https://<домен-preprod>/health`, **без
 6. **Раз в неделю** — агент в режиме `status`: список долга перед prod.
 7. **Новые фичи проверяются локально.** Отдельного тестового стенда больше нет.
 
+### Релиз «Limity tygodniowe» (журнал: X-15…X-19)
+
+Две миграции в одном выкате: `20261029120000_weekly_limits` раскладывает
+`monthly_limits` по неделям ISO, `20261030120000_drop_monthly_limits` удаляет
+`monthly_limits` — **необратимо**, откат только восстановлением дампа (docs/23
+«Откат → 3. Откат данных»). Строгий порядок, на prod — тот же.
+
+1. **X-15 🖥 Бэкап** — первая команда PP-20 и проверка файлов из C-03.
+2. **X-16 🖥 Снимок до выката** (только чтение) — сохранить вывод обеих команд:
+   ```bash
+   docker exec magguarantee-postgres psql -U magguarantee magguarantee -c 'SELECT "year", "month", "kmPerDay", "ratePerKm", "kmPerSaturday" FROM "monthly_limits" ORDER BY 1, 2'
+   ```
+   ```bash
+   docker exec magguarantee-postgres psql -U magguarantee magguarantee -Atc 'SELECT count(*) AS expected_rows FROM "monthly_limits" AS ml CROSS JOIN LATERAL generate_series(0, 30) AS i WHERE ml."month" BETWEEN 1 AND 12 AND EXTRACT(MONTH FROM make_date(ml."year", ml."month", 1) + i) = ml."month" AND EXTRACT(ISODOW FROM make_date(ml."year", ml."month", 1) + i) = 4'
+   ```
+3. **X-17 🐙 Выкат** — Actions → Deploy → Run workflow → `staging`.
+4. **X-18 🖥 Проверки сразу после выката**, до любых правок лимитов:
+   ```bash
+   docker exec magguarantee-postgres psql -U magguarantee magguarantee -c "SELECT migration_name, finished_at FROM _prisma_migrations WHERE migration_name IN ('20261029120000_weekly_limits', '20261030120000_drop_monthly_limits')"
+   ```
+   ```bash
+   docker exec magguarantee-postgres psql -U magguarantee magguarantee -Atc "SELECT 'weekly_rows: ' || count(*) FROM weekly_limits UNION ALL SELECT 'monthly_limits: ' || coalesce(to_regclass('public.monthly_limits')::text, 'dropped')"
+   ```
+   ```bash
+   docker exec -i magguarantee-postgres psql -U magguarantee magguarantee <<'SQL'
+   SELECT "isoYear", "isoWeek", "kmPerSaturday" FROM "weekly_limits"
+    WHERE "kmPerSaturday" > 0
+      AND (EXTRACT(DAY FROM to_date(format('%s-%s-6', "isoYear", "isoWeek"), 'IYYY-IW-ID'))::int - 1) / 7 % 2 = 1;
+   SQL
+   ```
+   Ожидаемо: обе миграции с `finished_at`; `weekly_rows` = `expected_rows` из X-16;
+   `monthly_limits: dropped`; последний запрос — `(0 rows)` (суббота стоит только
+   у недель, чья суббота была 1-й / 3-й / 5-й в своём месяце).
+5. **X-19 💻 Календарь** — admin открывает `/employee/limits` и сверяет значения
+   со снимком X-16.
+
 ---
 
 ## Фаза 11. Перенос на prod

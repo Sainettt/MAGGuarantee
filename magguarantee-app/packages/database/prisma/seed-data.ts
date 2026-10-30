@@ -2,15 +2,14 @@
 // production one-shot bootstrap (prisma/seed.prod.ts).
 //
 // This module holds ONLY the reference-data the two seeds have in common:
-// AppConfig keys, the TrailerType catalog, the MonthlyLimit and WeeklyLimit
-// placeholders and the stanowisko → role mapping the Google SSO reads.
+// AppConfig keys, the TrailerType catalog, the WeeklyLimit placeholders and the
+// stanowisko → role mapping the Google SSO reads.
 // It deliberately does NOT instantiate a PrismaClient — each seed entrypoint
 // owns its own client and passes it into these functions, so a single run never
 // opens two clients.
 //
-// All five functions are idempotent: they upsert on a unique business field
-// (config-key / trailer-type-name / (year, month) / (isoYear, isoWeek) /
-// stanowisko-code).
+// All four functions are idempotent: they upsert on a unique business field
+// (config-key / trailer-type-name / (isoYear, isoWeek) / stanowisko-code).
 
 import { PrismaClient, Role } from '../src/generated';
 
@@ -116,40 +115,24 @@ export const SEED_TRAILER_TYPES: SeedTrailerType[] = [
   { name: 'COIL', shortCode: 'COIL', description: 'Naczepa coilmulde (rolki stali)', active: true },
 ];
 
-// ─── Monthly limits (placeholders) ──────────────────────
-// SUPERSEDED by the weekly limits below (2026-10-29); still seeded because the
-// api reads monthly_limits until stage 3. Removed in stage 5 (docs/17
-// «Доработка (2026-10-29)»).
-// Years 2026 and 2027 × 12 months = 24 rows. Admins edit through UI.
-// Keying on (year, month) composite unique → idempotent. Years are pinned
-// explicitly (rather than "current + next") so the seed produces the same
-// 24 rows regardless of when it runs — important for fixture-based tests
-// in Phase 3 km-calc and to match docs/17-migration-roadmap.md Phase 3 scope.
-
-export const MONTHLY_LIMIT_KM_PER_DAY = '540';
-export const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
-// Guarantee km credited for a single qualifying ("odd") Saturday. Placeholder
-// fake-data value (half of kmPerDay=540) — carries NO business meaning, just
-// makes the feature demoable. NULL would be treated as 0 by km-calc; we seed a
-// non-null value so the odd-Saturday credit shows up out of the box.
-export const MONTHLY_LIMIT_KM_PER_SATURDAY = '270';
-export const MONTHLY_LIMIT_YEARS = [2026, 2027];
-
 // ─── Weekly limits (placeholders) ───────────────────────
 // Every ISO week of ISO years 2026 and 2027 = 53 + 52 = 105 rows. Admins edit
-// through UI. Keyed on the (isoYear, isoWeek) composite unique → idempotent;
-// years pinned for the same reason as the monthly ones.
+// through UI. Keyed on the (isoYear, isoWeek) composite unique → idempotent.
+// Years are pinned explicitly (rather than "current + next") so the seed
+// produces the same 105 rows regardless of when it runs.
 //
-// The values reproduce what migration 20261029120000_weekly_limits unrolls from
-// the monthly placeholders above, so a freshly seeded DB and a DB migrated from
-// the monthly seed hold the SAME weeks:
+// The values reproduce what migration 20261029120000_weekly_limits unrolled
+// from the former monthly placeholders (24 `monthly_limits` rows for 2026–2027,
+// table dropped by 20261030120000_drop_monthly_limits), so a freshly seeded DB
+// and a DB seeded before 2026-10-29 and then migrated hold the SAME weeks:
 //   - kmPerDay 540, ratePerKm 0.5 on every week;
 //   - kmPerSaturday 270 if the week's Saturday is the 1st / 3rd / 5th Saturday
 //     of its month (the payouts of the retired "odd Saturday" rule), else 0;
 //   - NULL (not configured — pays the same as 0) when that Saturday falls in a
 //     calendar year outside WEEKLY_LIMIT_ISO_YEARS. Only 2027-W52 (Saturday
-//     01.01.2028): the migration finds no monthly row for January 2028 there.
-// Plain values with no business meaning, as for the monthly placeholders.
+//     01.01.2028): the migration found no monthly row for January 2028 there.
+// Plain fake-data values with no business meaning (270 = half of 540), just
+// enough to make the feature demoable out of the box.
 
 export const WEEKLY_LIMIT_KM_PER_DAY = '540';
 export const WEEKLY_LIMIT_RATE_PER_KM = '0.5';
@@ -270,28 +253,6 @@ export async function seedTrailerTypes(prisma: PrismaClient): Promise<number> {
     });
   }
   return SEED_TRAILER_TYPES.length;
-}
-
-export async function seedMonthlyLimits(prisma: PrismaClient): Promise<number> {
-  let count = 0;
-  for (const year of MONTHLY_LIMIT_YEARS) {
-    for (let month = 1; month <= 12; month++) {
-      await prisma.monthlyLimit.upsert({
-        where: { year_month: { year, month } },
-        create: {
-          year,
-          month,
-          kmPerDay: MONTHLY_LIMIT_KM_PER_DAY,
-          ratePerKm: MONTHLY_LIMIT_RATE_PER_KM,
-          kmPerSaturday: MONTHLY_LIMIT_KM_PER_SATURDAY,
-        },
-        // Don't overwrite values on rerun — admin may have tuned them.
-        update: {},
-      });
-      count++;
-    }
-  }
-  return count;
 }
 
 export async function seedWeeklyLimits(prisma: PrismaClient): Promise<number> {

@@ -73,8 +73,11 @@ export const AUDIT_TARGET_TYPES = [
   'DriverAttachment',
   // km limits per ISO week since 2026-10-29 (`limits.update` / `limits.bulkUpdate`).
   'WeeklyLimit',
-  // Pre-2026-10-29 limit edits — rows with this target exist on prod, so it
-  // stays filterable after `monthly_limits` is gone.
+  // Audit-only, NOT a live model: the monthly limits (`MonthlyLimit` /
+  // `monthly_limits`) were dropped with the move to ISO weeks, but prod
+  // `audit_log` keeps rows with this targetType from before 2026-10-29 — keep
+  // it so the `GET /audit?targetType=` picker can still find them. Never tag a
+  // new `@Audit` with it.
   'MonthlyLimit',
   'MailJob',
   // Google SSO — the stanowisko → role table an admin edits (docs/24).

@@ -445,7 +445,6 @@ export class DiagnosticsRepository {
           'vehicles',
           'drivers',
           'trailers',
-          'monthly_limits',
           'weekly_limits',
           'delegations'
         )

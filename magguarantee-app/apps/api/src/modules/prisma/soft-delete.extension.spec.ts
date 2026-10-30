@@ -83,8 +83,8 @@ describe('softDeleteExtension internals', () => {
       'AppConfig',
       'TrailerType',
       'ClaimSequence',
-      'MonthlyLimit',
       'WeeklyLimit',
+      'ClaimAttachment',
       undefined,
       '',
     ])('rejects non-soft model %p', (m) => {

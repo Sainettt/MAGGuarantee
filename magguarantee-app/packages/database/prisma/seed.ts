@@ -1,10 +1,10 @@
 // Phase 2 seed — auth slice + reference data.
 //
 // Idempotent: every upsert keys on a unique business field (login / email /
-// config-key / trailer-type-name / (year, month) / (isoYear, isoWeek)), so
-// re-running the script will not duplicate rows. Existing rows are kept in sync
-// with the seed source-of-truth where it makes sense (users), or left untouched
-// where the admin is expected to edit through the UI (monthly / weekly limits).
+// config-key / trailer-type-name / (isoYear, isoWeek)), so re-running the
+// script will not duplicate rows. Existing rows are kept in sync with the seed
+// source-of-truth where it makes sense (users), or left untouched where the
+// admin is expected to edit through the UI (weekly limits).
 //
 // Out of scope: real claims and the bulk of carriers / vehicles — those are
 // created via the API. The seed only builds a small demo fleet: one carrier,
@@ -25,16 +25,11 @@ import {
   Role,
 } from '../src/generated';
 import {
-  MONTHLY_LIMIT_KM_PER_DAY,
-  MONTHLY_LIMIT_KM_PER_SATURDAY,
-  MONTHLY_LIMIT_RATE_PER_KM,
-  MONTHLY_LIMIT_YEARS,
   WEEKLY_LIMIT_ISO_YEARS,
   WEEKLY_LIMIT_KM_PER_DAY,
   WEEKLY_LIMIT_KM_PER_SATURDAY,
   WEEKLY_LIMIT_RATE_PER_KM,
   seedAppConfig,
-  seedMonthlyLimits,
   seedStanowiskoRoles,
   seedTrailerTypes,
   seedWeeklyLimits,
@@ -229,9 +224,9 @@ const plusDays = (base: Date, days: number): Date => new Date(base.getTime() + d
 /** Date-only value (UTC midnight) for `@db.Date` columns. */
 const dateOnly = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
-// MonthlyLimit / WeeklyLimit placeholders, AppConfig and TrailerType reference
-// data live in ./seed-data (shared with the production bootstrap). The km/day
-// and rate/km constants are imported above for the dev banner output.
+// WeeklyLimit placeholders, AppConfig and TrailerType reference data live in
+// ./seed-data (shared with the production bootstrap). The km/day and rate/km
+// constants are imported above for the dev banner output.
 
 // ─── Seed functions ─────────────────────────────────────
 
@@ -874,7 +869,6 @@ function printBanner(
   trailerTypeCount: number,
   teamCount: number,
   transferDemo: { vehicles: number; transfers: number; delegations: number },
-  monthlyLimitCount: number,
   weeklyLimitCount: number,
   stanowiskoRoleCount: number,
 ): void {
@@ -917,11 +911,6 @@ function printBanner(
       `${transferDemo.delegations} delegations on ${TRANSFERRED_VEHICLE_PLATE}`,
   );
   console.log(
-    `Seeded MonthlyLimit: ${monthlyLimitCount} rows (years ${MONTHLY_LIMIT_YEARS.join(', ')}, ` +
-      `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM}, ` +
-      `kmPerSaturday=${MONTHLY_LIMIT_KM_PER_SATURDAY})`,
-  );
-  console.log(
     `Seeded WeeklyLimit: ${weeklyLimitCount} rows (ISO years ${WEEKLY_LIMIT_ISO_YEARS.join(', ')}, ` +
       `kmPerDay=${WEEKLY_LIMIT_KM_PER_DAY}, ratePerKm=${WEEKLY_LIMIT_RATE_PER_KM}, ` +
       `kmPerSaturday=${WEEKLY_LIMIT_KM_PER_SATURDAY} on odd Saturdays of the month, else 0)`,
@@ -947,7 +936,6 @@ async function main(): Promise<void> {
   // After the fleet (carrier / trailer / driver) and the users (planisci, their
   // lider, eksport, weryfikator) it references.
   const transferDemo = await seedPlannerTransferDemo(fleet);
-  const monthlyLimitCount = await seedMonthlyLimits(prisma);
   const weeklyLimitCount = await seedWeeklyLimits(prisma);
   const stanowiskoRoleCount = await seedStanowiskoRoles(prisma);
   printBanner(
@@ -956,7 +944,6 @@ async function main(): Promise<void> {
     trailerTypeCount,
     teamCount,
     transferDemo,
-    monthlyLimitCount,
     weeklyLimitCount,
     stanowiskoRoleCount,
   );

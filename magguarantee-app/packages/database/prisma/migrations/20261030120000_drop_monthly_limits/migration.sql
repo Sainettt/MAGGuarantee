@@ -1,0 +1,43 @@
+-- Drop the retired per-month km limits (docs/17 «Доработка (2026-10-29)»,
+-- stage 5). Km limits are per ISO week since 2026-10-29: `weekly_limits` is the
+-- only limits table. Rules: docs/12 §«LIMITY KM → WeeklyLimit».
+--
+-- Why it is safe:
+--   * The data is already carried over. The previous migration,
+--     20261029120000_weekly_limits, unrolled every `monthly_limits` row into
+--     the ISO weeks it owns. Nothing else in `monthly_limits` is needed.
+--   * No code reads or writes the table: since stage 4 the api and the web work
+--     only with `weekly_limits`, and the seeds no longer write `monthly_limits`.
+--     The table has no foreign keys in or out, so nothing else is affected.
+--
+-- Order: this MUST run AFTER 20261029120000_weekly_limits, whose step 2 reads
+-- `monthly_limits`. On staging and prod both arrive in the same deploy; the
+-- timestamp order (20261029… < 20261030…) makes `prisma migrate deploy` apply
+-- the unroll first, then this drop. Do not rename either directory.
+--
+-- IRREVERSIBLE: the monthly rows are gone after this. There is no down
+-- migration, and the weekly rows cannot be folded back into months (an admin
+-- may set different values per week). The rollout needs a DB backup taken right
+-- before the deploy (ops runbook) — it is the only remaining copy of the
+-- monthly data.
+--
+-- Checking the unroll: one `migrate deploy` applies both migrations, so the
+-- live DB never holds both tables at once. Of the two checks in the header of
+-- 20261029120000_weekly_limits, the `kmPerSaturday` one reads only
+-- `weekly_limits` and still works after this drop. The row-count one reads
+-- `monthly_limits` — split it: BEFORE the deploy (next to the backup) note
+--
+--   SELECT count(*) AS expected_rows
+--     FROM "monthly_limits" AS ml
+--    CROSS JOIN LATERAL generate_series(0, 30) AS i
+--    WHERE ml."month" BETWEEN 1 AND 12
+--      AND EXTRACT(MONTH FROM make_date(ml."year", ml."month", 1) + i) = ml."month"
+--      AND EXTRACT(ISODOW FROM make_date(ml."year", ml."month", 1) + i) = 4;
+--
+-- and right AFTER it `SELECT count(*) FROM "weekly_limits";` must equal it
+-- (before any admin edit in /employee/limits).
+--
+-- DDL identical to `prisma migrate diff` from the previous schema.
+
+-- DropTable
+DROP TABLE "monthly_limits";
