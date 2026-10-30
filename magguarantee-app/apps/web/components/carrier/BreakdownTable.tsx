@@ -1,66 +1,72 @@
 'use client';
 
-// Phase 3 — read-only month-by-month km-calc breakdown rendered on the
-// new-claim form's preview panel AND inside the (narrow) employee claim-detail
-// modal. Per docs/14 § Phase 3 "<BreakdownTable>" + § "Responsive breakdown".
-// The shape mirrors `MonthBreakdownDto` from `@magguarantee/shared`.
+// Read-only week-by-week km-calc breakdown — one row per ISO week of the claim
+// period (docs/14 §18.7, since 2026-10-29). Rendered on the new-claim preview
+// panel, on the carrier's claim page AND inside the (narrow) employee claim
+// modal. The row shape is `WeekBreakdownDto` from `@magguarantee/shared`.
 //
-// Responsive strategy (docs/14 § "Responsive breakdown table") — CONTAINER
-// QUERIES, not viewport breakpoints. The breakdown renders inside a narrow
-// modal column whose width is unrelated to the viewport, so a viewport
-// breakpoint (`sm:`) would pick the wrong layout (the wide table would win on
-// any desktop viewport even when the host column is ~270px). The root is a
-// `@container`; the card/table toggle is driven by the component's OWN width:
-//   • container `< 34rem` (narrow modal column / phone): a STACKED CARD per
-//     month. The 4 metrics become label/value rows — no horizontal scroll, no
-//     squished columns.
-//   • container `≥ 34rem` (wide carrier preview panel, roomy modal): the
-//     classic 5-column <table>, tightened to `text-xs` + `px-2` with
-//     `whitespace-nowrap` headers so the abbreviated PL/EN labels never wrap.
-// Both views are always rendered; visibility is toggled with the container
-// variants `@max-[34rem]:block` / `@min-[34rem]:block` (Tailwind v4 has
-// container queries in core — no plugin). The excluded-days disclosure is
-// shared via <ExcludedDays>.
+// Responsive strategy (docs/14 §`<BreakdownTable>` «Responsive behavior»,
+// §18.7.4) — CONTAINER QUERIES, not viewport breakpoints. The breakdown lives
+// inside a modal column whose width is unrelated to the viewport, so the root
+// is a `@container` and the layout is picked by the component's OWN width:
+//   • container `≥ 36rem` (staff `≥ 46rem`): the 6-column <table> (staff 8),
+//     `text-xs` + `px-2`, `whitespace-nowrap` headers;
+//   • below that: ONE COLLAPSED ROW per week (§18.7.3) — label, mode badge and
+//     «Km/tydz.» on one line; tapping expands a <dl> with the details and the
+//     excluded days. 13 weeks of 2×2 cards would be ~1 600 px on a phone.
+// Both layouts are always rendered; the toggle is two LITERAL class sets
+// (Tailwind v4 scans the source — an interpolated `@min-[${bp}]` generates no
+// CSS). No horizontal scroll in the narrow layout, ever.
 //
-// SWITCHED-OFF MONTHS (docs/14 §16.5) — a month whose guarantee is off pays
-// nothing, and a table of zeroes with no explanation reads as a bug. Derived
-// from the fields the breakdown already carries (see
-// `lib/claims/breakdownGuarantee.ts`): a fully-off month is muted and badged
-// «Gwarancja wyłączona», a Saturdays-only month is badged but NOT muted (it
-// pays), and wherever nothing is guaranteed the €/km cell prints «—» instead
-// of the engine's 0,50 fallback — a price per kilometre is meaningless with
-// zero kilometres and reads as a promise. A period that is off end-to-end
-// renders an <EmptyState> instead of a table of zeroes.
+// Row label «Tydz. 23 · 03.06–07.06» is clipped to the claim period, with the
+// full week in `title` / sr-only (`<IsoWeekLabel>`). Rows are neither collapsed
+// nor grouped by month: a finance breakdown hides nothing, and grouping by the
+// Thursday's month would put «29.06–05.07» under July.
 //
-// MIXED PERIOD (docs/14 §16.5.1/§16.5.3/§16.5.5, docs/20 §0⁵) — ONLY when the
-// server says so (`breakdown.mileageSource === 'board'`, never re-derived from
-// the rows): the payout is settled on the weryfikator's daily-km board, so the
-// neutral <GuaranteeGapNotice> goes ABOVE the numbers (the numbers are what
-// look broken). Two audiences, decided by data, not by role:
-//   • carrier (no `boardSettlement` prop) — one notice, no km/day figures, and
+// SATURDAY — its own «Sob.» column (§18.7.1), so `Dni × Km/dz. + Sob. =
+// Km/tydz.` is visible arithmetic. Three states (shared `weekSaturdayStatus`):
+// credited km; `0` muted — the week has a Saturday guarantee but its Saturday
+// was not credited (outside the period / an excluded day, which then sits in
+// «Dni wyłączone»); `—` muted — the week has no Saturday guarantee.
+//
+// SWITCHED-OFF WEEKS (§16.5.2) — a week whose guarantee is off pays nothing,
+// and a row of zeroes with no explanation reads as a bug. Derived from the
+// row (see `lib/claims/breakdownGuarantee.ts`): a fully-off week is muted and
+// badged «Gwarancja wyłączona», a Saturday-only week is badged «Tylko sobota»
+// but NOT muted (it pays), and an off week's €/km is «—», never the engine's
+// 0,50 fallback (a price per kilometre is meaningless with zero kilometres).
+// A period that is off end-to-end renders an <EmptyState> instead.
+//
+// MIXED PERIOD (§16.5.1/§16.5.3/§16.5.5, docs/20 §0⁵) — ONLY when the server
+// says so (`breakdown.mileageSource === 'board'`, never re-derived from the
+// rows): the payout is settled on the weryfikator's daily-km board, so the
+// neutral <GuaranteeGapNotice> goes ABOVE the numbers. Two audiences, decided
+// by data, not by role:
+//   • carrier (no `boardSettlement` prop) — one notice, no board figures, and
 //     `mileageEffective` is shown nowhere;
 //   • staff (`boardSettlement` passed by ClaimModal) — the staff notice plus two
-//     board columns right of «Km/mc» («Km wg weryfikatora», «Wpisane dni»), a
-//     «Razem» footer pairing guaranteed km with the live board total (the sum
-//     of the column above it), and a 40rem (not 34rem) table/card threshold because the table is now
-//     7 columns wide.
-//
-// Each month exposes a chevron when the engine surfaced any holiday /
-// EU-truck-ban days that were dropped from the count. Expanding reveals the
-// explicit date + label so the carrier can see WHY a workday didn't pay out
-// (weekends are universal and intentionally not listed).
+//     board columns right of «Km/tydz.» («Km wg weryfikatora», «Wpisane dni»),
+//     joined by `isoWeek`, a «Razem» footer pairing guaranteed km with the live
+//     board total, and a 46rem (not 36rem) layout threshold.
 
-import { useState } from 'react';
-import { AlertTriangle, CalendarOff, ChevronDown, Info } from 'lucide-react';
+import { useId, useState } from 'react';
+import {
+  AlertTriangle,
+  CalendarOff,
+  ChevronDown,
+  ChevronRight,
+  Info,
+} from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   formatDaysPl,
   type BoundaryDayDto,
   type ClaimBoardSettlement,
   type KmCalcBreakdown,
-  type MonthBreakdownDto,
+  type WeekBreakdownDto,
 } from '@magguarantee/shared';
 
+import IsoWeekLabel from '@/components/claims/IsoWeekLabel';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LockNotice } from '@/components/ui/LockNotice';
@@ -68,11 +74,13 @@ import {
   analyzeBreakdown,
   boardCell,
   boardColumnTotalKm,
-  boardMonthIndex,
-  isMonthGuaranteeDisabled,
-  isMonthSaturdayOnly,
+  boardWeekIndex,
+  isWeekdayGuaranteeOff,
+  saturdayCell,
+  weekGuaranteeMode,
   type BoardCell,
   type BoardValueCell,
+  type SaturdayCell,
 } from '@/lib/claims/breakdownGuarantee';
 import { cn } from '@/lib/utils';
 
@@ -109,7 +117,7 @@ export interface BreakdownTableProps {
   /**
    * STAFF ONLY — the live board settlement computed for THIS `breakdown` (same
    * response / same period; never a board from one request next to a
-   * breakdown from another — after a period edit the months would not line
+   * breakdown from another — after a period edit the weeks would not line
    * up). Passed only by ClaimModal; the carrier pages never pass it and the
    * API never sends it to a carrier. The component does not check the role:
    * the staff variant is chosen by the data (§16.5.1). Ignored unless
@@ -120,7 +128,11 @@ export interface BreakdownTableProps {
   className?: string;
 }
 
-/** The «Gwarancja wyłączona» / «tylko w soboty» chip — outline, never loud. */
+const TH =
+  'px-2 py-2 h-10 text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap';
+const TD_NUM = 'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap';
+
+/** The «Gwarancja wyłączona» / «Tylko sobota» chip — outline, never loud. */
 function GuaranteeBadge({ label }: { label: string }) {
   return (
     <Badge
@@ -132,13 +144,40 @@ function GuaranteeBadge({ label }: { label: string }) {
   );
 }
 
+/** The mode badge of a week; `short` in the collapsed rows (§18.7.3). */
+function WeekModeBadge({
+  row,
+  short = false,
+}: {
+  row: WeekBreakdownDto;
+  short?: boolean;
+}) {
+  const t = useTranslations('carrier.breakdown');
+  const mode = weekGuaranteeMode(row);
+  if (mode === 'disabled') {
+    return (
+      <GuaranteeBadge
+        label={t(short ? 'guaranteeDisabledShort' : 'guaranteeDisabled')}
+      />
+    );
+  }
+  if (mode === 'saturdayOnly') {
+    return (
+      <GuaranteeBadge
+        label={t(short ? 'guaranteeSaturdayOnlyShort' : 'guaranteeSaturdayOnly')}
+      />
+    );
+  }
+  return null;
+}
+
 // ── Mixed-period notice (composition, not a primitive) ──────────────
 // Rendered ABOVE the table: the zero rows are what look broken, so the
 // explanation has to be read BEFORE the figures. Deliberately neutral (not a
 // warning): nothing went wrong, this IS the configuration. Missing board days
 // are a separate, amber notice in ClaimModal (staff only) — never mixed in here.
 // No km or day figures in either text (§16.5.3): the only parameter is the
-// number of months without a (weekday) guarantee.
+// number of weeks without a (weekday) guarantee.
 
 function GuaranteeGapNotice({
   audience,
@@ -162,8 +201,27 @@ function GuaranteeGapNotice({
   );
 }
 
-// ── Staff board cells (§16.5.5) ─────────────────────────────────────
-// «Wpisane dni» value: «14 z 14» / «2 z 2 sob.». An incomplete month is amber
+// ── «Sob.» — the week's Saturday (§18.7.1) ──────────────────────────
+// `counted` → the credited km; `notCounted` → `0`, `none` → «—», both muted
+// with a native title that says which of the two it is.
+
+function useSaturdayDisplay(cell: SaturdayCell): {
+  text: string;
+  muted: boolean;
+  title: string | undefined;
+} {
+  const t = useTranslations('carrier.breakdown');
+  if (cell.status === 'counted') {
+    return { text: formatInt(cell.km), muted: false, title: undefined };
+  }
+  if (cell.status === 'notCounted') {
+    return { text: '0', muted: true, title: t('saturdayNotCountedTitle') };
+  }
+  return { text: '—', muted: true, title: t('saturdayNoneTitle') };
+}
+
+// ── Staff board cells (§16.5.5, §18.7.2) ────────────────────────────
+// «Wpisane dni» value: «5 z 5» / «1 z 1 sob.». An incomplete week is amber
 // + <AlertTriangle> + an sr-only «brak danych za N dni» — colour is never the
 // only signal (WCAG 1.4.1).
 
@@ -190,29 +248,27 @@ function BoardDaysValue({ cell }: { cell: BoardValueCell }) {
 /** The two board `<td>`s of one table row. `border-l` = «gwarancja | tablica». */
 function BoardTableCells({ cell }: { cell: BoardCell }) {
   const t = useTranslations('carrier.breakdown');
-  const base =
-    'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap';
   if (cell.kind !== 'value') {
     // A number that takes no part in the settlement is not printed (same rule
     // as the ghost rate, §16.5.2).
     return (
       <>
         <td
-          className={cn(base, 'border-l border-border text-text-sub')}
+          className={cn(TD_NUM, 'border-l border-border text-text-sub')}
           title={cell.kind === 'off' ? t('boardOffTitle') : undefined}
         >
           —
         </td>
-        <td className={cn(base, 'text-text-sub')}>—</td>
+        <td className={cn(TD_NUM, 'text-text-sub')}>—</td>
       </>
     );
   }
   return (
     <>
-      <td className={cn(base, 'border-l border-border font-semibold text-text')}>
+      <td className={cn(TD_NUM, 'border-l border-border font-semibold text-text')}>
         {formatInt(cell.km)}
       </td>
-      <td className={base}>
+      <td className={TD_NUM}>
         <BoardDaysValue cell={cell} />
       </td>
     </>
@@ -220,11 +276,11 @@ function BoardTableCells({ cell }: { cell: BoardCell }) {
 }
 
 // ── Shared excluded-days disclosure ──────────────────────────────────
-// Rendered once per expanded month, identical in both the table and the
-// stacked-card layout. `as` lets the table variant wrap it in a colSpan <td>.
+// Rendered once per expanded week, identical in the table and in the
+// collapsed-row layout.
 
 interface ExcludedDaysProps {
-  excluded: NonNullable<MonthBreakdownDto['excludedDays']>;
+  excluded: WeekBreakdownDto['excludedDays'];
   locale: string;
 }
 
@@ -265,13 +321,12 @@ function ExcludedDays({ excluded, locale }: ExcludedDaysProps) {
 // calendar day was actually credited. `fraction` (0..1, already 2-dp from the
 // engine) is rendered with the same `formatDaysPl` used by the `workingDays`
 // column, so "0,75 dnia" here lines up with the day-counts above. Rendered
-// ONCE at the block root so it appears identically under both the stacked-card
-// and the wide-table variant.
+// ONCE at the block root so it appears identically under both layouts.
 //   • single-day period → engine reports the same date+fraction on both
 //     boundaries, so we collapse to one line.
 //   • fraction 0 → that boundary day wasn't counted (Sunday / EU-ban / a
-//     non-qualifying Saturday); shown muted with an explicit "not counted".
-//   • both null → legacy claim / empty range → the whole strip is omitted.
+//     Saturday that was not credited); shown muted with "not counted".
+//   • both null → empty range → the whole strip is omitted.
 
 interface BoundaryDaysProps {
   firstDay: KmCalcBreakdown['firstDay'];
@@ -344,149 +399,126 @@ function BoundaryDays({ firstDay, lastDay, locale }: BoundaryDaysProps) {
   );
 }
 
-// ── Shared month-toggle button (chevron + ym + count) ────────────────
+// ── <WeekToggle> — chevron + week label + excluded-day count ─────────
+// The table's disclosure for «Dni wyłączone» (formerly <MonthToggle>). Its
+// accessible name is its content — the week label and the count — with
+// `aria-expanded` for the state; a week without excluded days is plain text,
+// indented to line up with the toggles.
 
-interface MonthToggleProps {
-  row: MonthBreakdownDto;
+interface WeekToggleProps {
+  row: WeekBreakdownDto;
   open: boolean;
   onToggle: () => void;
   excludedCount: number;
 }
 
-function MonthToggle({ row, open, onToggle, excludedCount }: MonthToggleProps) {
+function WeekToggle({ row, open, onToggle, excludedCount }: WeekToggleProps) {
   const t = useTranslations('carrier.breakdown');
+  const label = (
+    <IsoWeekLabel
+      isoWeek={row.isoWeek}
+      periodStart={row.periodStart}
+      periodEnd={row.periodEnd}
+    />
+  );
   if (excludedCount === 0) {
-    return (
-      <span className="font-mono text-text pl-[22px]">{row.yearMonth}</span>
-    );
+    return <span className="pl-[22px] text-text">{label}</span>;
   }
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      aria-label={open ? t('hideDetails') : t('showDetails')}
-      title={t('excludedDaysCount', { count: excludedCount })}
-      className="inline-flex items-center gap-1.5 font-mono text-text hover:text-brand transition-colors"
+      className="inline-flex items-center gap-1.5 rounded-sm text-text transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
     >
       <ChevronDown
         size={14}
         aria-hidden
         className={cn(
-          'transition-transform shrink-0',
+          'shrink-0 transition-transform',
           open ? 'rotate-0' : '-rotate-90',
         )}
       />
-      <span>{row.yearMonth}</span>
-      <span className="text-xs font-sans text-text-sub">
+      {label}
+      <span className="whitespace-nowrap text-xs text-text-sub">
         ({t('excludedDaysCount', { count: excludedCount })})
       </span>
     </button>
   );
 }
 
-// ── Table variant (container ≥ 34rem) ───────────────────────────────
+// ── Table layout (container ≥ 36rem, staff ≥ 46rem) ─────────────────
 
-function TableMonthRow({
+function TableWeekRow({
   row,
   locale,
   board,
 }: {
-  row: MonthBreakdownDto;
+  row: WeekBreakdownDto;
   locale: string;
-  /** Staff board cells for this month; `null` ⇒ no board columns at all. */
+  /** Staff board cells for this week; `null` ⇒ no board columns at all. */
   board: BoardCell | null;
 }) {
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
-  // Legacy claims persisted before `excludedDays` was added may lack the field.
   const excluded = row.excludedDays ?? [];
-  // Odd-Saturday guarantee — only surfaced when a qualifying Saturday was
-  // actually credited this month. `workingDays` is weekdays-only, so this line
-  // explains why `kmInMonth` exceeds `workingDays × kmPerDay`.
-  const hasSaturdays = row.saturdaysCounted > 0;
-  const disabled = isMonthGuaranteeDisabled(row);
-  const saturdayOnly = isMonthSaturdayOnly(row);
+  const disabled = weekGuaranteeMode(row) === 'disabled';
+  const weekdaysOff = isWeekdayGuaranteeOff(row);
+  const saturday = useSaturdayDisplay(saturdayCell(row));
   // Full-width sub-rows span the board columns too when they are present.
-  const span = board ? 7 : 5;
+  const span = board ? 8 : 6;
 
   return (
     <>
-      {/* When a Saturday sub-row follows, drop the month row's bottom border so
-          the note reads as part of the same month block. */}
       <tr
         className={cn(
-          hasSaturdays ? '' : 'border-b border-border last:border-b-0',
-          // The ONE muted row state: guarantee off. Saturdays-only months stay
+          'border-b border-border last:border-b-0',
+          // The ONE muted row state: guarantee off. Saturday-only weeks stay
           // normal — they pay.
           disabled && 'bg-input/40',
         )}
       >
         <td className="px-2 py-2 h-10 align-middle">
           <div className="flex flex-wrap items-center gap-1.5">
-            <MonthToggle
+            <WeekToggle
               row={row}
               open={open}
               onToggle={() => setOpen((v) => !v)}
               excludedCount={excluded.length}
             />
-            {disabled && <GuaranteeBadge label={t('guaranteeDisabled')} />}
-            {saturdayOnly && (
-              <GuaranteeBadge label={t('guaranteeSaturdayOnly')} />
-            )}
+            <WeekModeBadge row={row} />
           </div>
         </td>
-        <td className="px-2 py-2 h-10 text-right tabular-nums text-text align-middle whitespace-nowrap">
+        <td className={cn(TD_NUM, 'text-text')}>
           {formatDaysPl(row.workingDays)}
         </td>
-        <td
-          className={cn(
-            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
-            disabled ? 'text-text-sub' : 'text-text',
-          )}
-        >
+        <td className={cn(TD_NUM, weekdaysOff ? 'text-text-sub' : 'text-text')}>
           {formatInt(row.kmPerDay)}
         </td>
         <td
-          className={cn(
-            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
-            disabled ? 'text-text-sub' : 'text-text',
-          )}
+          className={cn(TD_NUM, saturday.muted ? 'text-text-sub' : 'text-text')}
+          title={saturday.title}
+        >
+          {saturday.text}
+        </td>
+        <td
+          className={cn(TD_NUM, disabled ? 'text-text-sub' : 'text-text')}
           title={disabled ? t('rateNoneTitle') : undefined}
         >
-          {/* Ghost rate: with zero guaranteed km the engine still reports the
-              global 0,50 €/km fallback. Printing it next to «0 km» looks like
-              a promise, so it is «—» everywhere (§16.5.2, locked). */}
+          {/* Ghost rate: with zero guaranteed km the rate is not a price —
+              «—» (§16.5.2, locked). */}
           {disabled ? '—' : formatRate(row.ratePerKm)}
         </td>
         <td
           className={cn(
-            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
+            TD_NUM,
             disabled ? 'text-text-sub' : 'font-semibold text-text',
           )}
         >
-          {formatInt(row.kmInMonth)}
+          {formatInt(row.kmInWeek)}
         </td>
         {board && <BoardTableCells cell={board} />}
       </tr>
-      {hasSaturdays && (
-        <tr className="border-b border-border last:border-b-0">
-          <td colSpan={span} className="px-2 pb-2 pt-0">
-            <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pl-[22px] text-xs text-text-sub">
-              <span className="font-semibold uppercase tracking-wide">
-                {t('saturdays')}
-              </span>
-              <span className="tabular-nums">
-                {t('saturdaysDetail', {
-                  count: String(row.saturdaysCounted),
-                  perSaturday: formatInt(row.kmPerSaturday),
-                  total: formatInt(row.kmFromSaturdays),
-                })}
-              </span>
-            </div>
-          </td>
-        </tr>
-      )}
       {excluded.length > 0 && open && (
         <tr className="border-b border-border last:border-b-0 bg-bg/60">
           <td colSpan={span} className="px-3 py-3">
@@ -498,131 +530,154 @@ function TableMonthRow({
   );
 }
 
-// ── Stacked-card variant (container < 34rem) ─────────────────────────
-// Each month is a bordered card. The 4 metrics render as a 2×2 label/value
-// grid; the row total (Km/mc) is emphasised. No horizontal scroll ever.
+// ── Collapsed-row layout (container < 36rem, staff < 46rem, §18.7.3) ──
+// One line per week: the whole line is the disclosure button (label, mode
+// badge, the staff «incomplete board» triangle and «Km/tydz.» stay visible
+// while collapsed); the expansion holds the metrics and «Dni wyłączone».
 
-function CardMonth({
+/** One `dt`/`dd` pair of the expansion. */
+function DetailPair({
+  label,
+  children,
+  className,
+  title,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+  title?: string;
+}) {
+  return (
+    <div className={cn('flex items-baseline justify-between gap-2', className)}>
+      <dt className="text-text-sub">{label}</dt>
+      <dd className="tabular-nums" title={title}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function CollapsedWeekRow({
   row,
   locale,
   board,
 }: {
-  row: MonthBreakdownDto;
+  row: WeekBreakdownDto;
   locale: string;
-  /** Staff board block for this month; `null` ⇒ no board rows at all. */
+  /** Staff board block for this week; `null` ⇒ no board rows at all. */
   board: BoardCell | null;
 }) {
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
+  const panelId = useId();
   const excluded = row.excludedDays ?? [];
-  const hasSaturdays = row.saturdaysCounted > 0;
-  const disabled = isMonthGuaranteeDisabled(row);
-  const saturdayOnly = isMonthSaturdayOnly(row);
+  const disabled = weekGuaranteeMode(row) === 'disabled';
+  const weekdaysOff = isWeekdayGuaranteeOff(row);
+  const saturday = useSaturdayDisplay(saturdayCell(row));
+  const boardMissing = board?.kind === 'value' ? board.missing : 0;
 
   return (
-    <li
-      className={cn(
-        'rounded-md border border-border p-3',
-        disabled && 'bg-input/40',
-      )}
-    >
-      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-        <MonthToggle
-          row={row}
-          open={open}
-          onToggle={() => setOpen((v) => !v)}
-          excludedCount={excluded.length}
+    <li className={cn(disabled && 'bg-input/40')}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-input/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+      >
+        <ChevronRight
+          size={14}
+          aria-hidden
+          className={cn(
+            'shrink-0 text-text-sub transition-transform',
+            open && 'rotate-90',
+          )}
         />
-        {disabled && <GuaranteeBadge label={t('guaranteeDisabled')} />}
-        {saturdayOnly && <GuaranteeBadge label={t('guaranteeSaturdayOnly')} />}
-      </div>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-text-sub">{t('workingDays')}</dt>
-          <dd className="tabular-nums text-text">
-            {formatDaysPl(row.workingDays)}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-text-sub">{t('kmPerDay')}</dt>
-          <dd
-            className={cn(
-              'tabular-nums',
-              disabled ? 'text-text-sub' : 'text-text',
-            )}
-          >
-            {formatInt(row.kmPerDay)}
-          </dd>
-        </div>
-        {/* In the narrow card the ghost-rate row is dropped entirely — a
-            column can only be blanked to «—», a card row can go away. */}
-        {!disabled && (
-          <div className="flex items-baseline justify-between gap-2">
-            <dt className="text-text-sub">{t('ratePerKm')}</dt>
-            <dd className="tabular-nums text-text">
-              {formatRate(row.ratePerKm)}
-            </dd>
-          </div>
-        )}
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-text-sub">{t('kmInMonth')}</dt>
-          <dd
-            className={cn(
-              'tabular-nums',
-              disabled ? 'text-text-sub' : 'font-semibold text-text',
-            )}
-          >
-            {formatInt(row.kmInMonth)}
-          </dd>
-        </div>
-        {hasSaturdays && (
-          <div className="col-span-2 flex items-baseline justify-between gap-2 border-t border-border/60 pt-2">
-            <dt className="text-text-sub">{t('saturdays')}</dt>
-            <dd className="tabular-nums text-text">
-              {t('saturdaysDetail', {
-                count: String(row.saturdaysCounted),
-                perSaturday: formatInt(row.kmPerSaturday),
-                total: formatInt(row.kmFromSaturdays),
-              })}
-            </dd>
-          </div>
-        )}
-        {/* Staff board block (§16.5.5) — after «Soboty», full-width rows
-            («Km wg weryfikatora» does not fit half a card). An `off` month has
-            no block at all: a card row can go away, a table cell cannot. */}
-        {board && board.kind !== 'off' && (
-          <>
-            <div className="col-span-2 flex items-baseline justify-between gap-2 border-t border-border/60 pt-2">
-              <dt className="text-text-sub">{t('boardKm')}</dt>
-              <dd
-                className={cn(
-                  'tabular-nums',
-                  board.kind === 'value'
-                    ? 'font-semibold text-text'
-                    : 'text-text-sub',
-                )}
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          {/* May wrap here (only here): the narrow layout must never clip or
+              scroll, even with a year in the range on a 320px phone. */}
+          <IsoWeekLabel
+            isoWeek={row.isoWeek}
+            periodStart={row.periodStart}
+            periodEnd={row.periodEnd}
+            className="whitespace-normal text-sm text-text"
+          />
+          <WeekModeBadge row={row} short />
+          {boardMissing > 0 && (
+            // Staff: the incomplete-board signal is visible while collapsed.
+            <span className="inline-flex items-center text-warning-dark dark:text-warning">
+              <AlertTriangle size={12} aria-hidden className="shrink-0" />
+              <span className="sr-only">
+                {t('boardDaysMissingSr', { count: boardMissing })}
+              </span>
+            </span>
+          )}
+        </span>
+        <span
+          className={cn(
+            'shrink-0 whitespace-nowrap text-sm tabular-nums',
+            disabled ? 'text-text-sub' : 'font-semibold text-text',
+          )}
+        >
+          {formatInt(row.kmInWeek)} km
+        </span>
+      </button>
+
+      <div id={panelId} hidden={!open} className="px-3 pb-3 pl-8">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <DetailPair label={t('workingDays')}>
+            <span className="text-text">{formatDaysPl(row.workingDays)}</span>
+          </DetailPair>
+          <DetailPair label={t('kmPerDay')}>
+            <span className={weekdaysOff ? 'text-text-sub' : 'text-text'}>
+              {formatInt(row.kmPerDay)}
+            </span>
+          </DetailPair>
+          <DetailPair label={t('saturday')} title={saturday.title}>
+            <span className={saturday.muted ? 'text-text-sub' : 'text-text'}>
+              {saturday.text}
+            </span>
+          </DetailPair>
+          {/* An off week has no €/km pair at all — a cell can only be blanked
+              to «—», a list row can go away (§16.5.2). */}
+          {!disabled && (
+            <DetailPair label={t('ratePerKm')}>
+              <span className="text-text">{formatRate(row.ratePerKm)}</span>
+            </DetailPair>
+          )}
+          {/* Staff board block (§16.5.5) — full-width rows («Km wg
+              weryfikatora» does not fit half a row). An `off` week has no
+              block at all. */}
+          {board && board.kind !== 'off' && (
+            <>
+              <DetailPair
+                label={t('boardKm')}
+                className="col-span-2 border-t border-border/60 pt-2"
               >
-                {board.kind === 'value' ? formatInt(board.km) : '—'}
-              </dd>
-            </div>
-            <div className="col-span-2 flex items-baseline justify-between gap-2">
-              <dt className="text-text-sub">{t('boardDays')}</dt>
-              <dd className="tabular-nums text-text-sub">
+                {board.kind === 'value' ? (
+                  <span className="font-semibold text-text">
+                    {formatInt(board.km)}
+                  </span>
+                ) : (
+                  <span className="text-text-sub">—</span>
+                )}
+              </DetailPair>
+              <DetailPair label={t('boardDays')} className="col-span-2">
                 {board.kind === 'value' ? (
                   <BoardDaysValue cell={board} />
                 ) : (
-                  '—'
+                  <span className="text-text-sub">—</span>
                 )}
-              </dd>
-            </div>
-          </>
+              </DetailPair>
+            </>
+          )}
+        </dl>
+        {excluded.length > 0 && (
+          <div className="mt-3 border-t border-border pt-3">
+            <ExcludedDays excluded={excluded} locale={locale} />
+          </div>
         )}
-      </dl>
-      {excluded.length > 0 && open && (
-        <div className="mt-3 border-t border-border pt-3">
-          <ExcludedDays excluded={excluded} locale={locale} />
-        </div>
-      )}
+      </div>
     </li>
   );
 }
@@ -648,15 +703,15 @@ export function BreakdownTable({
   // Board columns: mixed period (server flag) AND a board to show. An
   // all-active period stays exactly as before even if a board is passed in.
   const boardMode = info.boardSettled && staffBoard !== null;
-  const boardByMonth = boardMode ? boardMonthIndex(staffBoard) : null;
-  const boardFor = (yearMonth: string): BoardCell | null =>
-    boardByMonth ? boardCell(boardByMonth.get(yearMonth)) : null;
-  // «Razem» of the «Km wg weryfikatora» column (tfoot + the card total): the
-  // LIVE board total, `boardSettlement.mileageEffective` — the same source as
-  // the month rows above it, so the column always adds up. Not
+  const boardByWeek = boardMode ? boardWeekIndex(staffBoard) : null;
+  const boardFor = (isoWeek: string): BoardCell | null =>
+    boardByWeek ? boardCell(boardByWeek.get(isoWeek)) : null;
+  // «Razem» of the «Km wg weryfikatora» column (tfoot + the collapsed total):
+  // the LIVE board total, `boardSettlement.mileageEffective` — the same source
+  // as the week rows above it, so the column always adds up. Not
   // `breakdown.mileageEffective`: that is the km the claim was last priced on
-  // and goes stale once the weryfikator fills a day. This is a km figure, not
-  // money — the payout is shown only in ClaimModal's dopłata field.
+  // and goes stale once the weryfikator fills a day. A km figure, not money —
+  // the payout is shown only in ClaimModal's dopłata field.
   const boardTotalKm = formatOptionalInt(boardColumnTotalKm(staffBoard));
 
   // Whole period without a guarantee → an honest empty state instead of a
@@ -683,54 +738,53 @@ export function BreakdownTable({
   return (
     <div
       className={cn(
-        // `@container` establishes the container-query context; the card/table
+        // `@container` establishes the container-query context; the layout
         // toggle below is keyed on THIS element's width, not the viewport.
         '@container bg-card rounded-lg border border-border overflow-hidden',
         className,
       )}
     >
       {info.showMixedNotice && (
-        <GuaranteeGapNotice audience={audience} count={info.offMonthCount} />
+        <GuaranteeGapNotice audience={audience} count={info.offWeekCount} />
       )}
 
-      {/* Stacked cards — container narrower than 34rem (cramped modal column,
-          phone); 40rem with the staff board columns, which make the table 7
-          columns wide. Literal class strings on purpose: Tailwind v4 scans the
-          source, an interpolated `@min-[${bp}]` would generate no CSS. No
-          horizontal scroll. */}
+      {/* Collapsed rows — container narrower than 36rem (cramped modal
+          column, phone); 46rem with the staff board columns, which make the
+          table 8 columns wide. Literal class strings on purpose (see the file
+          header). No horizontal scroll. */}
       <div
         className={
           boardMode
-            ? '@max-[40rem]:block @min-[40rem]:hidden p-3'
-            : '@max-[34rem]:block @min-[34rem]:hidden p-3'
+            ? '@max-[46rem]:block @min-[46rem]:hidden'
+            : '@max-[36rem]:block @min-[36rem]:hidden'
         }
       >
         {rows.length === 0 ? (
-          <p className="px-1 py-6 text-center text-sm text-text-sub">
+          <p className="px-4 py-6 text-center text-sm text-text-sub">
             {t('empty')}
           </p>
         ) : (
           <>
-            <ul className="space-y-2">
+            <ul className="divide-y divide-border">
               {rows.map((row) => (
-                <CardMonth
-                  key={row.yearMonth}
+                <CollapsedWeekRow
+                  key={row.isoWeek}
                   row={row}
                   locale={locale}
-                  board={boardFor(row.yearMonth)}
+                  board={boardFor(row.isoWeek)}
                 />
               ))}
             </ul>
-            {boardMode ? (
-              <div className="mt-3 rounded-md bg-bg px-3 py-2.5">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-xs font-extrabold uppercase tracking-wider text-text">
-                    {t('totalKmGuaranteed')}
-                  </span>
-                  <span className="tabular-nums font-extrabold text-text">
-                    {formatInt(breakdown.kmGuaranteed)}
-                  </span>
-                </div>
+            <div className="border-t border-border bg-bg px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-text">
+                  {t('totalKmGuaranteed')}
+                </span>
+                <span className="tabular-nums font-extrabold text-text">
+                  {formatInt(breakdown.kmGuaranteed)}
+                </span>
+              </div>
+              {boardMode && (
                 <div className="mt-1.5 flex items-baseline justify-between gap-2">
                   <span className="text-xs font-extrabold uppercase tracking-wider text-text">
                     {t('boardTotalKm')}
@@ -739,77 +793,50 @@ export function BreakdownTable({
                     {boardTotalKm}
                   </span>
                 </div>
-              </div>
-            ) : (
-              <div className="mt-3 flex items-baseline justify-between gap-2 rounded-md bg-bg px-3 py-2.5">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-text">
-                  {t('totalKmGuaranteed')}
-                </span>
-                <span className="tabular-nums font-extrabold text-text">
-                  {formatInt(breakdown.kmGuaranteed)}
-                </span>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </div>
 
-      {/* Table — container at least 34rem wide (preview panel, roomy modal);
-          40rem with the staff board columns. */}
+      {/* Table — container at least 36rem wide (preview panel, roomy modal);
+          46rem with the staff board columns. */}
       <div
         className={
           boardMode
-            ? '@max-[40rem]:hidden @min-[40rem]:block overflow-x-auto'
-            : '@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto'
+            ? '@max-[46rem]:hidden @min-[46rem]:block overflow-x-auto'
+            : '@max-[36rem]:hidden @min-[36rem]:block overflow-x-auto'
         }
       >
         <table className="w-full text-xs">
           <thead className="bg-bg">
             <tr>
-              <th
-                scope="col"
-                className="px-2 py-2 h-10 text-left text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-              >
-                {t('month')}
+              <th scope="col" className={cn(TH, 'text-left')}>
+                {t('week')}
               </th>
-              <th
-                scope="col"
-                className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-              >
+              <th scope="col" className={cn(TH, 'text-right')}>
                 {t('workingDays')}
               </th>
-              <th
-                scope="col"
-                className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-              >
+              <th scope="col" className={cn(TH, 'text-right')}>
                 {t('kmPerDay')}
               </th>
-              <th
-                scope="col"
-                className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-              >
+              <th scope="col" className={cn(TH, 'text-right')}>
+                {t('saturday')}
+              </th>
+              <th scope="col" className={cn(TH, 'text-right')}>
                 {t('ratePerKm')}
               </th>
-              <th
-                scope="col"
-                className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-              >
-                {t('kmInMonth')}
+              <th scope="col" className={cn(TH, 'text-right')}>
+                {t('kmInWeek')}
               </th>
-              {/* Board columns sit right of «Km/mc» so each row reads as the
-                  pair «gwarantowano X → przejechano Y» (§16.5.5). */}
+              {/* Board columns sit right of «Km/tydz.» so each row reads as
+                  the pair «gwarantowano X → przejechano Y» (§16.5.5). */}
               {boardMode && (
                 <>
-                  <th
-                    scope="col"
-                    className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-l border-border whitespace-nowrap"
-                  >
+                  <th scope="col" className={cn(TH, 'border-l text-right')}>
                     {t('boardKm')}
                   </th>
-                  <th
-                    scope="col"
-                    className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
-                  >
+                  <th scope="col" className={cn(TH, 'text-right')}>
                     {t('boardDays')}
                   </th>
                 </>
@@ -820,7 +847,7 @@ export function BreakdownTable({
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={boardMode ? 7 : 5}
+                  colSpan={boardMode ? 8 : 6}
                   className="px-2 py-8 text-center text-sm text-text-sub"
                 >
                   {t('empty')}
@@ -828,11 +855,11 @@ export function BreakdownTable({
               </tr>
             )}
             {rows.map((row) => (
-              <TableMonthRow
-                key={row.yearMonth}
+              <TableWeekRow
+                key={row.isoWeek}
                 row={row}
                 locale={locale}
-                board={boardFor(row.yearMonth)}
+                board={boardFor(row.isoWeek)}
               />
             ))}
           </tbody>
@@ -842,9 +869,9 @@ export function BreakdownTable({
                 {/* With the board columns one label heads two different totals,
                     so it is the plain «Razem» — the column headers say which is
                     which. «Wpisane dni» is not summed: days and Saturdays of
-                    different months do not add up to a meaningful number. */}
+                    different weeks do not add up to a meaningful number. */}
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-2 py-2 h-10 text-text uppercase text-xs tracking-wide whitespace-nowrap"
                 >
                   {boardMode ? t('total') : t('totalKmGuaranteed')}
@@ -866,8 +893,8 @@ export function BreakdownTable({
         </table>
       </div>
 
-      {/* Boundary-day fractions — one strip below both variants (rendered only
-          when there are month rows and the engine surfaced the boundaries). */}
+      {/* Boundary-day fractions — one strip below both layouts (rendered only
+          when there are week rows and the engine surfaced the boundaries). */}
       {rows.length > 0 && (
         <BoundaryDays
           firstDay={breakdown.firstDay}

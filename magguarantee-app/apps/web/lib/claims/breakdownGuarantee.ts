@@ -1,62 +1,87 @@
-// How the breakdown reads a month whose guarantee is switched off, and how it
-// reads a MIXED period settled on the weryfikator's daily-km board (docs/14
-// §16.5, docs/20 §0⁵).
+// How the breakdown reads an ISO week whose guarantee is switched off, its
+// Saturday, and a MIXED period settled on the weryfikator's daily-km board
+// (docs/14 §16.5, §18.7; docs/20 §0⁵). One row of the breakdown = one ISO week
+// of the claim period (since 2026-10-29).
 //
-// Month state — derived ENTIRELY from fields the breakdown already carries:
+// Week state — derived ENTIRELY from fields the row already carries (§16.5.1):
 //   disabled     — `kmPerDay === 0 && kmPerSaturday === 0` → nothing is paid
-//   saturdayOnly — `kmPerDay === 0 && kmFromSaturdays > 0` → weekdays off,
-//                  Saturdays still pay (the row is NOT muted: it pays)
+//   saturdayOnly — `kmPerDay === 0 && kmPerSaturday > 0`  → weekdays off, the
+//                  Saturday is guaranteed (badged even when that Saturday was
+//                  not credited — the «Sob.» cell then shows `0`; the row is
+//                  NOT muted)
+//   active       — otherwise, no marking
+//
+// Saturday cell («Sob.», §18.7.1) — the shared `weekSaturdayStatus`:
+//   counted    — the week's Saturday was credited → its km;
+//   notCounted — the week has a Saturday guarantee but its Saturday was not
+//                credited (outside the claim period, or an excluded day) → `0`;
+//   none       — the week has no Saturday guarantee → «—».
 //
 // Period state:
-//   allDisabled  — every row `disabled` (from the rows, as before) → EmptyState
+//   allDisabled  — every row `disabled` → EmptyState instead of zero rows
 //   boardSettled — `breakdown.mileageSource === 'board'`, the SERVER flag. It is
-//                  NEVER re-derived from the rows: the one old proportional
-//                  wniosek has mixed rows but no `mileageSource`, and any of the
-//                  new notices would be untrue for it (§16.5.1). Absent ⇒
+//                  NEVER re-derived from the rows (§16.5.1); absent ⇒
 //                  `'declared'`.
 //
-// Board detail (staff only) — `ClaimBoardSettlement` is joined to the breakdown
-// rows by `yearMonth` and turned into a per-month cell descriptor, so the table
-// and the card variant render from the same decision.
+// Board detail (staff only) — `ClaimBoardSettlement.weeks` is joined to the
+// breakdown rows by `isoWeek` and turned into a per-week cell descriptor, so
+// the table and the collapsed-row variant render from the same decision.
 //
 // Runtime note: `KmCalcBreakdown` is a Zod-INFERRED type, but the web client
-// does not re-parse API responses — a legacy `Claim.breakdown` really can
-// arrive without optional keys at runtime even where TypeScript says `number`.
-// Numeric reads go through `finite()` for that reason.
+// does not re-parse API responses, so numeric reads go through `finite()` —
+// a half-built preview must not render NaN.
 //
 // Pure, framework-free, unit-tested (`breakdownGuarantee.test.ts`).
 
-import type {
-  ClaimBoardSettlement,
-  KmCalcBreakdown,
-  MonthBreakdownDto,
-  SettlementBoardMonthDto,
+import {
+  weekSaturdayStatus,
+  type ClaimBoardSettlement,
+  type KmCalcBreakdown,
+  type SettlementBoardWeekDto,
+  type WeekBreakdownDto,
+  type WeekSaturdayStatus,
 } from '@magguarantee/shared';
 
 function finite(value: number | undefined | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-// ── Month flags ──────────────────────────────────────────────────────
+// ── Week flags ───────────────────────────────────────────────────────
 
-export function isMonthGuaranteeDisabled(row: MonthBreakdownDto): boolean {
+type WeekLimitFields = Pick<WeekBreakdownDto, 'kmPerDay' | 'kmPerSaturday'>;
+
+/** Neither the weekdays nor the Saturday of the week carry a guarantee. */
+export function isWeekGuaranteeDisabled(row: WeekLimitFields): boolean {
   return (finite(row.kmPerDay) ?? 0) === 0 && (finite(row.kmPerSaturday) ?? 0) === 0;
 }
 
-export function isMonthSaturdayOnly(row: MonthBreakdownDto): boolean {
-  return (
-    (finite(row.kmPerDay) ?? 0) === 0 && (finite(row.kmFromSaturdays) ?? 0) > 0
-  );
+/**
+ * Weekdays off, the Saturday guaranteed. Keyed on the LIMIT (`kmPerSaturday >
+ * 0`), not on whether the Saturday was credited: a week whose guaranteed
+ * Saturday falls outside the period is still «Tylko sobota» — the «Sob.»
+ * column shows the `0` (§16.5.1).
+ */
+export function isWeekSaturdayOnly(row: WeekLimitFields): boolean {
+  return (finite(row.kmPerDay) ?? 0) === 0 && (finite(row.kmPerSaturday) ?? 0) > 0;
 }
 
 /**
- * The month's WEEKDAY guarantee is off (`kmPerDay === 0`), with or without
- * Saturdays. Exactly the months that switch a period onto the board
+ * The week's WEEKDAY guarantee is off (`kmPerDay === 0`), with or without its
+ * Saturday. Exactly the weeks that switch a period onto the board
  * (`settlementNeedsBoard` in `@magguarantee/shared`), so a board-settled
  * period always has at least one.
  */
-export function isMonthWeekdayGuaranteeOff(row: MonthBreakdownDto): boolean {
+export function isWeekdayGuaranteeOff(row: Pick<WeekBreakdownDto, 'kmPerDay'>): boolean {
   return (finite(row.kmPerDay) ?? 0) === 0;
+}
+
+export type WeekGuaranteeMode = 'disabled' | 'saturdayOnly' | 'active';
+
+/** The one marking a row gets (badge + muting), §16.5.2. */
+export function weekGuaranteeMode(row: WeekLimitFields): WeekGuaranteeMode {
+  if (isWeekGuaranteeDisabled(row)) return 'disabled';
+  if (isWeekSaturdayOnly(row)) return 'saturdayOnly';
+  return 'active';
 }
 
 /**
@@ -69,9 +94,31 @@ export function isGhostRate(kmGuaranteed: number | null | undefined): boolean {
   return (finite(kmGuaranteed) ?? 0) === 0;
 }
 
+// ── Saturday cell ────────────────────────────────────────────────────
+
+export interface SaturdayCell {
+  status: WeekSaturdayStatus;
+  /** km credited for the Saturday — `0` unless `counted`. */
+  km: number;
+}
+
+/** What the «Sob.» cell of one week shows (§18.7.1). */
+export function saturdayCell(
+  row: Pick<WeekBreakdownDto, 'kmPerSaturday' | 'saturdaysCounted' | 'kmFromSaturdays'>,
+): SaturdayCell {
+  const status = weekSaturdayStatus({
+    kmPerSaturday: finite(row.kmPerSaturday) ?? 0,
+    saturdaysCounted: finite(row.saturdaysCounted) ?? 0,
+  });
+  return {
+    status,
+    km: status === 'counted' ? (finite(row.kmFromSaturdays) ?? 0) : 0,
+  };
+}
+
 // ── Period ───────────────────────────────────────────────────────────
 
-/** The server's mixed-period flag. Absent (legacy / all-active) ⇒ `false`. */
+/** The server's mixed-period flag. Absent ⇒ `'declared'` ⇒ `false`. */
 export function isBoardSettled(
   breakdown: Pick<KmCalcBreakdown, 'mileageSource'> | null | undefined,
 ): boolean {
@@ -80,11 +127,11 @@ export function isBoardSettled(
 
 export interface BreakdownGuaranteeInfo {
   /**
-   * Months whose weekday guarantee is off (fully off or Saturdays-only) — the
+   * Weeks whose weekday guarantee is off (fully off or Saturday-only) — the
    * `count` of the mixed-period notice. Never 0 on a board-settled period.
    */
-  offMonthCount: number;
-  /** Every month of the period is off → `<EmptyState>` instead of zero rows. */
+  offWeekCount: number;
+  /** Every week of the period is off → `<EmptyState>` instead of zero rows. */
   allDisabled: boolean;
   /** `mileageSource === 'board'` — the server says the period is mixed. */
   boardSettled: boolean;
@@ -97,18 +144,18 @@ export function analyzeBreakdown(
 ): BreakdownGuaranteeInfo {
   const rows = breakdown.breakdown ?? [];
   let disabledCount = 0;
-  let offMonthCount = 0;
+  let offWeekCount = 0;
 
   for (const row of rows) {
-    if (isMonthGuaranteeDisabled(row)) disabledCount += 1;
-    if (isMonthWeekdayGuaranteeOff(row)) offMonthCount += 1;
+    if (isWeekGuaranteeDisabled(row)) disabledCount += 1;
+    if (isWeekdayGuaranteeOff(row)) offWeekCount += 1;
   }
 
   const allDisabled = rows.length > 0 && disabledCount === rows.length;
   const boardSettled = isBoardSettled(breakdown);
 
   return {
-    offMonthCount,
+    offWeekCount,
     allDisabled,
     boardSettled,
     showMixedNotice: boardSettled && !allDisabled,
@@ -126,7 +173,7 @@ export function isBoardIncomplete(
 
 /**
  * The «Razem» of the staff «Km wg weryfikatora» column: the LIVE board total
- * (`boardSettlement.mileageEffective` = Σ of the months' board km), i.e. the
+ * (`boardSettlement.mileageEffective` = Σ of the weeks' board km), i.e. the
  * same source as the rows above it, so the column always adds up. NOT
  * `breakdown.mileageEffective` — that is the km the claim was last PRICED on
  * (submit / verification / decision) and goes stale as soon as the weryfikator
@@ -138,49 +185,49 @@ export function boardColumnTotalKm(
   return finite(board?.mileageEffective);
 }
 
-/** `yearMonth` → board month, for joining onto the breakdown rows. */
-export function boardMonthIndex(
+/** `isoWeek` → board week, for joining onto the breakdown rows. */
+export function boardWeekIndex(
   board: ClaimBoardSettlement | null | undefined,
-): Map<string, SettlementBoardMonthDto> {
-  const out = new Map<string, SettlementBoardMonthDto>();
-  for (const month of board?.months ?? []) out.set(month.yearMonth, month);
+): Map<string, SettlementBoardWeekDto> {
+  const out = new Map<string, SettlementBoardWeekDto>();
+  for (const week of board?.weeks ?? []) out.set(week.isoWeek, week);
   return out;
 }
 
-/** A board month that has something to show. */
+/** A board week that has something to show. */
 export interface BoardValueCell {
   kind: 'value';
   /** Σ `drove` km on the counted days. */
   km: number;
   daysFilled: number;
   daysRequired: number;
-  /** Required days are Saturdays — the value is labelled «X z Y sob.». */
+  /** The required day is the week's Saturday — the value reads «1 z 1 sob.». */
   saturdaysOnly: boolean;
   /** `daysRequired − daysFilled`, never negative. `> 0` ⇒ amber + sr-only. */
   missing: number;
 }
 
 /**
- * What the two staff board cells of one month render (§16.5.5):
- *  - `off`   — guarantee off this month: «—» (+ `boardOffTitle`); the card
- *              variant drops the block entirely;
- *  - `none`  — no board month to pair with, or nothing required: plain «—»;
+ * What the two staff board cells of one week render (§16.5.5, §18.7.2):
+ *  - `off`   — guarantee off this week: «—» (+ `boardOffTitle`); the
+ *              collapsed-row variant drops the block entirely;
+ *  - `none`  — no board week to pair with, or nothing required: plain «—»;
  *  - `value` — board km + «filled z required».
  */
 export type BoardCell = { kind: 'off' } | { kind: 'none' } | BoardValueCell;
 
-export function boardCell(month: SettlementBoardMonthDto | undefined): BoardCell {
-  if (!month) return { kind: 'none' };
-  if (month.mode === 'off') return { kind: 'off' };
-  const daysRequired = finite(month.daysRequired) ?? 0;
+export function boardCell(week: SettlementBoardWeekDto | undefined): BoardCell {
+  if (!week) return { kind: 'none' };
+  if (week.mode === 'off') return { kind: 'off' };
+  const daysRequired = finite(week.daysRequired) ?? 0;
   if (daysRequired === 0) return { kind: 'none' };
-  const daysFilled = finite(month.daysFilled) ?? 0;
+  const daysFilled = finite(week.daysFilled) ?? 0;
   return {
     kind: 'value',
-    km: finite(month.km) ?? 0,
+    km: finite(week.km) ?? 0,
     daysFilled,
     daysRequired,
-    saturdaysOnly: month.mode === 'saturdaysOnly',
+    saturdaysOnly: week.mode === 'saturdaysOnly',
     missing: Math.max(0, daysRequired - daysFilled),
   };
 }

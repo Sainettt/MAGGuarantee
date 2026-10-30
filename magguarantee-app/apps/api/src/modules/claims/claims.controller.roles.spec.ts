@@ -8,7 +8,7 @@
 // `READ_ALLOWED` / `READ_REFUSED` block below.
 //
 // The limits-refresh endpoint re-prices a wniosek with the CURRENT
-// `monthly_limits` and answers with a full `ClaimDto` (payout figures
+// `weekly_limits` and answers with a full `ClaimDto` (payout figures
 // included), so its gate matters twice over — as a write gate AND as a read
 // gate.
 //

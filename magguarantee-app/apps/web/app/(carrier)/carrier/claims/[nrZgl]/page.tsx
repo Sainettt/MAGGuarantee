@@ -332,7 +332,7 @@ export default function ClaimDetailPage() {
       {claim.breakdown && (
         <div className="mb-6">
           <h2 className="text-sm font-bold uppercase tracking-wider text-text-sub mb-2">
-            {tDetail('monthlyBreakdown')}
+            {tDetail('weeklyBreakdown')}
           </h2>
           <BreakdownTable breakdown={claim.breakdown} />
         </div>

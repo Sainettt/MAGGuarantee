@@ -953,7 +953,7 @@ function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
     firstDay: obj.firstDay ?? null,
     lastDay: obj.lastDay ?? null,
     // Settlement fields (feature «wyłączane limity gwarancji», 2026-09-20).
-    // Rows written before it had every month active by construction, so both
+    // Rows written before it had every period active by construction, so both
     // day counters collapse to `totalDays`. `mileageEffective` and
     // `mileageSource` are deliberately NOT backfilled (they ride along in the
     // spread above when present): an absent `mileageEffective` makes the UI

@@ -39,7 +39,16 @@
     "clearFilters": "Wyczyść filtry",
     "showPassword": "Pokaż hasło",
     "hidePassword": "Ukryj hasło",
-    "refreshHint": "Kliknij, aby odświeżyć dane"
+    "refreshHint": "Kliknij, aby odświeżyć dane",
+    "isoWeek": {
+      "short": "Tydz. {week}",
+      "full": "Tydzień {week}",
+      "withRange": "Tydz. {week} · {from}–{to}",
+      "withDay": "Tydz. {week} · {day}",
+      "fullWithRange": "Tydzień {week} · {from}–{to}",
+      "count": "{count, plural, one {# tydzień} few {# tygodnie} many {# tygodni} other {# tygodnia}}",
+      "fullWeekTitle": "Pełny tydzień: {from}–{to}"
+    }
   },
   "formActive": {
     "vehicleConsequence": "Nieaktywny ciągnik znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.",
@@ -1473,7 +1482,7 @@
         },
         "boardGate": {
           "title": "{count, plural, =0 {Brak danych na tablicy km} one {Brak danych za # dzień} few {Brak danych za # dni} many {Brak danych za # dni} other {Brak danych za # dni}}",
-          "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
+          "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w tygodniach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
           "datesLabel": "Dni bez przebiegu na tablicy km",
           "showAll": "Pokaż wszystkie ({count})",
           "showLess": "Zwiń",
@@ -1484,10 +1493,10 @@
           "changedHintNoEdit": "Kwota dopłaty zmieniła się od zapisania weryfikacji — weryfikację musi ponownie zapisać administrator."
         },
         "shortfall": {
-          "line": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
+          "line": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
           "formula": "Niedojazd: {guaranteed} km gwarant. − {driven} {scope, select, board {km wg weryfikatora} other {km przebiegu}} = {km} km × {rate} €/km",
-          "metEqual": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
-          "metOver": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
+          "metEqual": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
+          "metOver": "{scope, select, board {W tygodniach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
         },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",
@@ -1613,7 +1622,15 @@
           "confirm": "Zastosuj nowe kwoty",
           "loading": "Przeliczanie…",
           "success": "Przeliczono wg aktualnych limitów",
-          "error": "Nie udało się przeliczyć wniosku"
+          "error": "Nie udało się przeliczyć wniosku",
+          "changedWeeks": "Zmienione limity ({count, plural, one {# tydzień} few {# tygodnie} many {# tygodni} other {# tygodnia}})",
+          "unchangedWeeks": "{count, plural, one {Pozostały # tydzień bez zmian.} few {Pozostałe # tygodnie bez zmian.} many {Pozostałych # tygodni bez zmian.} other {Pozostałe # tygodnia bez zmian.}}",
+          "showAll": "Pokaż wszystkie ({count})",
+          "showLess": "Zwiń",
+          "fieldKmPerDay": "Km/dz.",
+          "fieldSaturday": "Sobota",
+          "fieldRate": "€/km",
+          "valueOff": "wył."
         }
       }
     }
@@ -1981,7 +1998,7 @@
         "kmGuaranteed": "Km gwarantowane",
         "payment": "Dopłata gwarancyjna",
         "submitReklamacja": "Złóż reklamację",
-        "monthlyBreakdown": "Podział na miesiące",
+        "weeklyBreakdown": "Podział na tygodnie",
         "details": "Szczegóły",
         "amountRequested": "Kwota wnioskowana",
         "amountApproved": "Kwota zatwierdzona",
@@ -2075,13 +2092,14 @@
       "paymentEur": "Dopłata gwarancyjna (EUR)"
     },
     "breakdown": {
-      "month": "Miesiąc",
+      "week": "Tydzień",
       "workingDays": "Dni rob.",
       "kmPerDay": "Km/dz.",
+      "saturday": "Sob.",
       "ratePerKm": "€/km",
-      "kmInMonth": "Km/mc",
-      "saturdays": "Soboty",
-      "saturdaysDetail": "{count} × {perSaturday} = {total} km",
+      "kmInWeek": "Km/tydz.",
+      "saturdayNoneTitle": "Brak gwarancji sobotniej w tym tygodniu",
+      "saturdayNotCountedTitle": "Sobota z gwarancją, ale niezaliczona — poza okresem wniosku albo dzień wyłączony.",
       "empty": "Brak danych do podziału",
       "totalKmGuaranteed": "Razem (km gwarant.)",
       "excludedDays": "Dni wyłączone (święta / zakaz UE)",
@@ -2098,20 +2116,22 @@
       "boundaryExcluded": "{value} dnia · nie zaliczony",
       "boundaryHint": "Dni graniczne liczone są proporcjonalnie do godzin wyjazdu i powrotu.",
       "guaranteeDisabled": "Gwarancja wyłączona",
-      "guaranteeSaturdayOnly": "Gwarancja tylko w soboty",
-      "rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym miesiącu",
-      "mixedPeriodNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
-      "boardNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
+      "guaranteeSaturdayOnly": "Tylko sobota",
+      "guaranteeDisabledShort": "Wyłączona",
+      "guaranteeSaturdayOnlyShort": "Tylko sob.",
+      "rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym tygodniu",
+      "mixedPeriodNotice": "Okres obejmuje {count, plural, one {tydzień bez gwarancji} few {tygodnie bez gwarancji} many {tygodni bez gwarancji} other {tygodnia bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
+      "boardNotice": "Okres obejmuje {count, plural, one {tydzień bez gwarancji} few {tygodnie bez gwarancji} many {tygodni bez gwarancji} other {tygodnia bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w tygodniach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
       "boardKm": "Km wg weryfikatora",
       "boardDays": "Wpisane dni",
       "boardDaysValue": "{filled} z {required}",
       "boardSaturdaysValue": "{filled} z {required} sob.",
       "boardDaysMissingSr": "brak danych za {count, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
-      "boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym miesiącu",
+      "boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym tygodniu",
       "total": "Razem",
       "boardTotalKm": "Razem (km wg weryfikatora)",
       "allDisabledTitle": "Brak gwarancji w tym okresie",
-      "allDisabledBody": "Dla wszystkich miesięcy tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
+      "allDisabledBody": "Dla wszystkich tygodni tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
     },
     "reklamacja": {
       "sheetTitle": "Złóż reklamację",

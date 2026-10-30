@@ -227,7 +227,7 @@ describe('Claim gates — machine code on the RFC-7807 wire', () => {
       code: 'CLAIM_BOARD_INCOMPLETE',
       message:
         'Nie można zaakceptować wniosku — brak przebiegu na tablicy km za 1 dzień ' +
-        'w miesiącach z gwarancją: 18.09.2025. Poczekaj, aż weryfikator uzupełni dane.',
+        'w tygodniach z gwarancją: 18.09.2025. Poczekaj, aż weryfikator uzupełni dane.',
       extensions: { code: 'CLAIM_BOARD_INCOMPLETE', missingDates: ['2025-09-18'] },
     });
     const { host, captured } = makeHost();
@@ -241,6 +241,7 @@ describe('Claim gates — machine code on the RFC-7807 wire', () => {
     };
     expect(ext.code).toBe('CLAIM_BOARD_INCOMPLETE');
     expect(ext.missingDates).toEqual(['2025-09-18']);
+    expect(captured.body.detail).toContain('w tygodniach z gwarancją');
   });
 
   it('CLAIM_BOARD_CHANGED surfaces at body.extensions.code', () => {

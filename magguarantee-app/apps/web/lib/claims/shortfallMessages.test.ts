@@ -72,7 +72,7 @@ const mixed: AmountSource = {
 describe('niedojazd messages (pl)', () => {
   it('mixed period — sentence + formula of the real case', () => {
     expect(render('pl', mixed)).toEqual([
-      'W miesiącach z gwarancją pojazd przejechał o <b>2180 km mniej</b>, niż gwarantowano.',
+      'W tygodniach z gwarancją pojazd przejechał o <b>2180 km mniej</b>, niż gwarantowano.',
       'Niedojazd: 7630 km gwarant. − 5450 km wg weryfikatora = 2180 km × 0,50 €/km',
     ]);
   });
@@ -88,7 +88,7 @@ describe('niedojazd messages (pl)', () => {
 
   it('exactly met — one line', () => {
     expect(render('pl', { ...mixed, kmDifference: 0, paymentEur: 0 })).toEqual([
-      'W miesiącach z gwarancją pojazd przejechał dokładnie tyle, ile gwarantowano (7630 km). Gwarancja wyjeżdżona — dopłata nie przysługuje.',
+      'W tygodniach z gwarancją pojazd przejechał dokładnie tyle, ile gwarantowano (7630 km). Gwarancja wyjeżdżona — dopłata nie przysługuje.',
     ]);
   });
 
@@ -115,7 +115,7 @@ describe('niedojazd messages (pl)', () => {
 describe('niedojazd messages (en)', () => {
   it('mixed period — sentence + formula', () => {
     expect(render('en', mixed)).toEqual([
-      'In the guaranteed months the vehicle drove <b>2180 km less</b> than guaranteed.',
+      'In the guaranteed weeks the vehicle drove <b>2180 km less</b> than guaranteed.',
       'Shortfall: 7630 guaranteed km − 5450 km per verifier = 2180 km × 0,50 €/km',
     ]);
   });

@@ -2,10 +2,10 @@
 //
 // Feature «wyłączane limity gwarancji» (2026-09-20). Every OTHER recalc of an
 // existing wniosek is pinned to the limits snapshot frozen in its
-// `breakdown`, so a retroactively corrected `MonthlyLimit` never reaches a
+// `breakdown`, so a retroactively corrected `WeeklyLimit` never reaches a
 // filed wniosek by itself. This endpoint is the deliberate escape hatch:
 //
-//   - re-runs km-calc with NO `limitsSnapshot` (live `monthly_limits`);
+//   - re-runs km-calc with NO `limitsSnapshot` (live `weekly_limits`);
 //   - rewrites kmGuaranteed / kmDifference / paymentEur / ratePerKmEffective /
 //     breakdown / drivenDays / kmPerDay ONLY;
 //   - leaves period / mileage / status / `orig*` alone and sends no email;
@@ -14,6 +14,10 @@
 //   - resets the verification checkpoint + Maksim gate when the money moved,
 //     so a dopłata that crossed the authorization threshold cannot reach a
 //     decision unauthorised.
+//
+// The dry run (`GET …/recalc-limits/preview`) additionally lists the ISO
+// weeks whose limits would change (`changedWeeks`, 2026-10-29) — the stored
+// breakdown rows vs the fresh calc, paired by `isoWeek`.
 //
 // Style mirrors `claims.service.verify.spec.ts`: hand-rolled fakes, ambient
 // `AuditContext` simulating the production `AuditInterceptor`.
@@ -27,6 +31,7 @@ import type {
   ClaimStatus,
   KmCalcBreakdown,
   KmCalcResult,
+  WeekBreakdown,
 } from '@magguarantee/shared';
 
 import {
@@ -50,6 +55,7 @@ import type {
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 const ADMIN: AuthUser = makeAuthUser('admin', {
   sub: 'u-admin',
@@ -71,26 +77,35 @@ async function withAuditContext<T>(
   return { result, store };
 }
 
+/**
+ * The four ISO weeks of the fixture period 01.04–20.04.2026 (Wed … Mon):
+ * W14 and W17 are clipped by the period. Hand-rolled, 5 counted days each, so
+ * the totals stay the round 20 days the claim fixture carries.
+ */
+function weeksAt(
+  kmPerDay: number,
+  overrides: Partial<Record<string, Partial<WeekBreakdown>>> = {},
+): WeekBreakdown[] {
+  return [
+    makeWeekRow('2026-W14', { periodStart: '2026-04-01', kmPerDay, ...overrides['2026-W14'] }),
+    makeWeekRow('2026-W15', { kmPerDay, ...overrides['2026-W15'] }),
+    makeWeekRow('2026-W16', { kmPerDay, ...overrides['2026-W16'] }),
+    makeWeekRow('2026-W17', {
+      periodEnd: '2026-04-20',
+      kmPerDay,
+      ...overrides['2026-W17'],
+    }),
+  ];
+}
+
+/** The persisted breakdown — the limits SNAPSHOT: 540 km/day in every week. */
 function makeBreakdown(): KmCalcBreakdown {
   return {
     totalDays: 20,
     rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
-    breakdown: [
-      {
-        yearMonth: '2026-04',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10_800,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-    ],
+    breakdown: weeksAt(540),
     firstDay: null,
     lastDay: null,
     daysActive: 20,
@@ -196,26 +211,14 @@ function build(opts: {
     update: updateSpy,
   } as unknown as ClaimsRepository;
 
+  // Default fresh calc: today's limits halved every week (540 → 270 km/day).
   const kmCalcSpy = jest.fn(
     async (_input: KmCalcServiceInput): Promise<KmCalcResult> => ({
       totalDays: 20,
       rawTotalDays: 20,
       kmGuaranteed: 5_400,
       ratePerKmEffective: 0.5,
-      breakdown: [
-        {
-          yearMonth: '2026-04',
-          workingDays: 20,
-          kmPerDay: 270,
-          ratePerKm: 0.5,
-          saturdaysCounted: 0,
-          kmPerSaturday: 0,
-          kmFromSaturdays: 0,
-          kmInMonth: 5_400,
-          saturdayDays: [],
-          excludedDays: [],
-        },
-      ],
+      breakdown: weeksAt(270),
       firstDay: null,
       lastDay: null,
       ...opts.kmResult,
@@ -285,43 +288,26 @@ describe('ClaimsService.refreshLimits — happy path', () => {
   });
 
   it('a limit switched off by the refresh settles the period on the board', async () => {
-    // 01.04–08.05.2026: April keeps its guarantee, May is switched off.
+    // 01.04–08.05.2026 (W14 … W19): W14–W17 keep their guarantee, W18 and W19
+    // are switched off.
     const { svc, updateSpy, boardSpy } = build({
       claim: makeClaim({ dateEnd: new Date('2026-05-08T00:00:00.000Z') }),
       board: [
         { date: '2026-04-01', state: 'drove', km: 1_000 },
         { date: '2026-04-02', state: 'drove', km: 1_000 },
-        // May is off — whatever is on the board there is never charged.
+        // W19 is off — whatever is on the board there is never charged.
         { date: '2026-05-04', state: 'drove', km: 6_000 },
       ],
       kmResult: {
         kmGuaranteed: 2_700,
         breakdown: [
-          {
-            yearMonth: '2026-04',
-            workingDays: 10,
-            kmPerDay: 270,
-            ratePerKm: 0.5,
-            saturdaysCounted: 0,
-            kmPerSaturday: 0,
-            kmFromSaturdays: 0,
-            kmInMonth: 2_700,
-            saturdayDays: [],
-            excludedDays: [],
-          },
-          {
-            // Month switched off by the admin → its days must not charge.
-            yearMonth: '2026-05',
-            workingDays: 10,
-            kmPerDay: 0,
-            ratePerKm: 0.5,
-            saturdaysCounted: 0,
-            kmPerSaturday: 0,
-            kmFromSaturdays: 0,
-            kmInMonth: 0,
-            saturdayDays: [],
-            excludedDays: [],
-          },
+          makeWeekRow('2026-W14', { periodStart: '2026-04-01', workingDays: 3, kmPerDay: 270 }),
+          makeWeekRow('2026-W15', { workingDays: 5, kmPerDay: 270 }),
+          makeWeekRow('2026-W16', { workingDays: 1, kmPerDay: 270 }),
+          makeWeekRow('2026-W17', { workingDays: 1, kmPerDay: 270 }),
+          // Weeks switched off by the admin → their days must not charge.
+          makeWeekRow('2026-W18', { workingDays: 5, kmPerDay: 0 }),
+          makeWeekRow('2026-W19', { periodEnd: '2026-05-08', workingDays: 5, kmPerDay: 0 }),
         ],
       },
     });
@@ -337,7 +323,7 @@ describe('ClaimsService.refreshLimits — happy path', () => {
     expect(patch.breakdown?.daysActive).toBe(10);
     expect(patch.breakdown?.daysTotal).toBe(20);
     expect(patch.breakdown?.mileageSource).toBe('board');
-    // April on the board = 2_000 (the unrecorded April days count 0 km).
+    // W14–W17 on the board = 2_000 (their unrecorded days count 0 km).
     expect(patch.breakdown?.mileageEffective).toBe(2_000);
     // 2_700 − 2_000 = 700 ⇒ 350 € — the declared 8_000 km no longer decide.
     expect(patch.kmDifference).toBe(700);
@@ -560,6 +546,157 @@ describe('ClaimsService.previewLimitsRefresh — pure read', () => {
     const { svc } = build({ claim: makeClaim() });
     const out = await svc.previewLimitsRefresh('GWA/001/04/26');
     expect(() => RecalcLimitsPreviewSchema.parse(out)).not.toThrow();
+  });
+});
+
+describe('ClaimsService.previewLimitsRefresh — changedWeeks', () => {
+  it('lists every week whose limits moved, with «było / będzie» limits and kmInWeek', async () => {
+    // Default fixture: snapshot 540 km/day in all four weeks, today 270.
+    const { svc } = build({ claim: makeClaim() });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.unchangedWeekCount).toBe(0);
+    expect(out.changedWeeks.map((w) => w.isoWeek)).toEqual([
+      '2026-W14',
+      '2026-W15',
+      '2026-W16',
+      '2026-W17',
+    ]);
+    // Range = the week's days INSIDE the period (W14 starts on Wed 01.04,
+    // W17 ends on Mon 20.04).
+    expect(out.changedWeeks[0]).toEqual({
+      isoWeek: '2026-W14',
+      periodStart: '2026-04-01',
+      periodEnd: '2026-04-05',
+      current: { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0, kmInWeek: 2_700 },
+      next: { kmPerDay: 270, ratePerKm: 0.5, kmPerSaturday: 0, kmInWeek: 1_350 },
+    });
+    expect(out.changedWeeks[3]!.periodStart).toBe('2026-04-20');
+    expect(out.changedWeeks[3]!.periodEnd).toBe('2026-04-20');
+  });
+
+  it('only the edited week is listed; the rest are counted as unchanged', async () => {
+    const { svc } = build({
+      claim: makeClaim(),
+      kmResult: {
+        kmGuaranteed: 10_600,
+        breakdown: weeksAt(540, { '2026-W16': { kmPerDay: 500 } }),
+      },
+    });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.changedWeeks).toHaveLength(1);
+    expect(out.changedWeeks[0]!.isoWeek).toBe('2026-W16');
+    expect(out.changedWeeks[0]!.current.kmPerDay).toBe(540);
+    expect(out.changedWeeks[0]!.next.kmPerDay).toBe(500);
+    expect(out.changedWeeks[0]!.next.kmInWeek).toBe(2_500);
+    expect(out.unchangedWeekCount).toBe(3);
+    expect(out.changed).toBe(true);
+  });
+
+  it('a rate-only or a Saturday-only edit lists the week too', async () => {
+    const { svc } = build({
+      claim: makeClaim(),
+      kmResult: {
+        kmGuaranteed: 11_100,
+        breakdown: weeksAt(540, {
+          '2026-W15': { ratePerKm: 0.6 },
+          '2026-W16': {
+            kmPerSaturday: 300,
+            saturdaysCounted: 1,
+            saturdayDays: ['2026-04-18'],
+            kmFromSaturdays: 300,
+          },
+        }),
+      },
+    });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.changedWeeks.map((w) => w.isoWeek)).toEqual(['2026-W15', '2026-W16']);
+    expect(out.changedWeeks[0]!.next.ratePerKm).toBe(0.6);
+    expect(out.changedWeeks[0]!.next.kmInWeek).toBe(2_700); // km unchanged, rate moved
+    expect(out.changedWeeks[1]!.current.kmPerSaturday).toBe(0);
+    expect(out.changedWeeks[1]!.next).toEqual({
+      kmPerDay: 540,
+      ratePerKm: 0.5,
+      kmPerSaturday: 300,
+      kmInWeek: 3_000,
+    });
+    expect(out.unchangedWeekCount).toBe(2);
+  });
+
+  it('a week whose kmInWeek moved but whose limits did not is NOT listed', async () => {
+    // W14 switched off ⇒ the `hoursAdjusted` share moves onto the other weeks,
+    // changing their kmInWeek; their LIMITS are untouched.
+    const { svc } = build({
+      claim: makeClaim(),
+      kmResult: {
+        kmGuaranteed: 7_830,
+        breakdown: weeksAt(540, {
+          '2026-W14': { kmPerDay: 0 },
+          '2026-W15': { workingDays: 4.83 },
+        }),
+      },
+    });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.changedWeeks.map((w) => w.isoWeek)).toEqual(['2026-W14']);
+    expect(out.unchangedWeekCount).toBe(3);
+  });
+
+  it('identical limits everywhere ⇒ no changed week, every week unchanged', async () => {
+    const { svc } = build({
+      claim: makeClaim(),
+      kmResult: { kmGuaranteed: 10_800, breakdown: weeksAt(540) },
+    });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.changedWeeks).toEqual([]);
+    expect(out.unchangedWeekCount).toBe(4);
+    expect(out.changed).toBe(false);
+  });
+
+  it('weeks come out ascending even when the fresh rows do not', async () => {
+    const { svc } = build({
+      claim: makeClaim(),
+      kmResult: { breakdown: [...weeksAt(270)].reverse() },
+    });
+
+    const out = await svc.previewLimitsRefresh('GWA/001/04/26');
+
+    expect(out.changedWeeks.map((w) => w.isoWeek)).toEqual([
+      '2026-W14',
+      '2026-W15',
+      '2026-W16',
+      '2026-W17',
+    ]);
+  });
+
+  it('a stored breakdown without week rows (legacy / monthly) lists nothing and does not throw', async () => {
+    const legacyMonthly = {
+      ...makeBreakdown(),
+      breakdown: [
+        { yearMonth: '2026-04', workingDays: 20, kmPerDay: 540, ratePerKm: 0.5 },
+      ],
+    } as unknown as KmCalcBreakdown;
+    const forLegacy = build({ claim: makeClaim({ breakdown: legacyMonthly }) });
+    const forNull = build({ claim: makeClaim({ breakdown: null }) });
+
+    const outLegacy = await forLegacy.svc.previewLimitsRefresh('GWA/001/04/26');
+    const outNull = await forNull.svc.previewLimitsRefresh('GWA/001/04/26');
+
+    for (const out of [outLegacy, outNull]) {
+      expect(out.changedWeeks).toEqual([]);
+      expect(out.unchangedWeekCount).toBe(0);
+      // The money comparison is unaffected — it reads the claim columns.
+      expect(out.next.kmGuaranteed).toBe(5_400);
+      expect(() => RecalcLimitsPreviewSchema.parse(out)).not.toThrow();
+    }
   });
 });
 

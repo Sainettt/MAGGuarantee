@@ -28,6 +28,7 @@ import type {
   BoardDay,
   KmCalcResult,
   SubmitClaimDto,
+  WeekBreakdown,
 } from '@magguarantee/shared';
 
 import type { ConfigService } from '@nestjs/config';
@@ -55,6 +56,7 @@ import type {
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 /**
  * REWORK 2026-07-30 — the carrier DECLARES the period, the time window and the
@@ -314,7 +316,7 @@ function makeVehiclesRepo(): VehiclesRepository {
 function makeKmCalc(
   result?: Partial<KmCalcResult>,
   /**
-   * Whether every month of the period has a `MonthlyLimit` row. Consulted by
+   * Whether every ISO week of the period has a `WeeklyLimit` row. Consulted by
    * `_noGuaranteeViolation` to tell "nothing configured" from "deliberately
    * switched off" (feature «wyłączane limity gwarancji», 2026-09-20).
    */
@@ -548,7 +550,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       repoFake.creates[0]!.data.paymentEur,
     );
     // The engine's boundary-day credited fractions are threaded onto the
-    // persisted `Claim.breakdown` JSONB so the web "Miesiąc" block can render
+    // persisted `Claim.breakdown` JSONB so the web breakdown block can render
     // "ile z pierwszego / ostatniego dnia zaliczono" from the stored claim.
     expect(repoFake.creates[0]!.data.breakdown.firstDay).toEqual({
       date: '2026-03-09',
@@ -712,7 +714,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // Persisted verbatim, both in the working column and the carrier snapshot.
     expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
     expect(repoFake.creates[0]!.data.origMileage).toBe(8_000);
-    // Every month of the default fixture is active (empty breakdown) — submit
+    // Every week of the default fixture is active (empty breakdown) — submit
     // must not even read the board.
     expect(sumSpy).not.toHaveBeenCalled();
     expect(boardSpy).not.toHaveBeenCalled();
@@ -1273,23 +1275,25 @@ describe('ClaimsService.submit — why is the guarantee zero?', () => {
     jest.useRealTimers();
   });
 
-  /** One breakdown month, guarantee explicitly switched off (0 / 0). */
-  function disabledMonth(yearMonth = '2026-05') {
-    return {
-      yearMonth,
-      workingDays: 12,
-      kmPerDay: 0,
-      ratePerKm: 0.5,
-      saturdaysCounted: 0,
-      kmPerSaturday: 0,
-      kmFromSaturdays: 0,
-      kmInMonth: 0,
-      saturdayDays: [],
-      excludedDays: [],
-    };
+  /**
+   * The weeks of the default period 01.05–10.05.2026 — W18 (Fri 01.05, an
+   * EU-ban day, – Sun 03.05: no counted weekday) and W19 (04–10.05: 5) — with
+   * their weekday guarantee explicitly switched off (`kmPerDay = 0`). The
+   * fake's `totalDays` (12) only feeds the duration gate, which must pass.
+   */
+  function disabledWeeks(): WeekBreakdown[] {
+    return [
+      makeWeekRow('2026-W18', {
+        periodStart: '2026-05-01',
+        workingDays: 0,
+        kmPerDay: 0,
+        excludedDays: [{ date: '2026-05-01', label: 'Swieto Pracy' }],
+      }),
+      makeWeekRow('2026-W19', { periodEnd: '2026-05-10', kmPerDay: 0 }),
+    ];
   }
 
-  it('every month switched off → «Gwarancja km jest wyłączona dla tego okresu.»', async () => {
+  it('every week switched off → «Gwarancja km jest wyłączona dla tego okresu.»', async () => {
     const repoFake = makeRepo(null);
     const svc = makeService(
       repoFake,
@@ -1299,7 +1303,7 @@ describe('ClaimsService.submit — why is the guarantee zero?', () => {
         totalDays: 12,
         rawTotalDays: 12,
         kmGuaranteed: 0,
-        breakdown: [disabledMonth()],
+        breakdown: disabledWeeks(),
       }),
     );
 
@@ -1316,7 +1320,7 @@ describe('ClaimsService.submit — why is the guarantee zero?', () => {
     expect(repoFake.creates).toHaveLength(0);
   });
 
-  it('a month of the period has NO MonthlyLimit row → «Brak skonfigurowanych limitów…»', async () => {
+  it('a week of the period has NO WeeklyLimit row → «Brak skonfigurowanych limitów…»', async () => {
     const repoFake = makeRepo(null);
     const svc = makeService(
       repoFake,
@@ -1326,11 +1330,12 @@ describe('ClaimsService.submit — why is the guarantee zero?', () => {
         {
           totalDays: 12,
           rawTotalDays: 12,
-          // Zero guarantee even though the month is "active" — e.g. an active
-          // month whose credited days all fell away.
+          // Zero guarantee even though a week is "active" — e.g. an active
+          // week whose credited days all fell away.
           kmGuaranteed: 0,
           breakdown: [
-            { ...disabledMonth(), kmPerDay: 540, kmInMonth: 0 },
+            disabledWeeks()[0]!,
+            makeWeekRow('2026-W19', { kmPerDay: 540, kmInWeek: 0 }),
           ],
         },
         /* configured */ false,
@@ -1401,46 +1406,38 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
     jest.useRealTimers();
   });
 
-  // 27.04–10.05.2026: April guaranteed (27–30 = 4 weekdays × 540 = 2160 km),
-  // May switched off. The outing departed on the 27th so the departure floor
-  // lets the carrier declare that start.
+  // 27.04–11.05.2026 per ISO week: W18 (Mon 27.04 – Sun 03.05) guaranteed —
+  // 4 weekdays × 540 = 2160 km (Fri 01.05 is an EU-ban day); W19 (04–10.05)
+  // and W20 (Mon 11.05) switched off — 6 counted days. The outing departed on
+  // the 27th so the departure floor lets the carrier declare that start.
   const MIXED_CALC: Partial<KmCalcResult> = {
     totalDays: 10,
     rawTotalDays: 10,
     kmGuaranteed: 2_160,
     ratePerKmEffective: 0.5,
     breakdown: [
-      {
-        yearMonth: '2026-04',
+      makeWeekRow('2026-W18', {
         workingDays: 4,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 2_160,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2026-05',
-        workingDays: 6,
-        kmPerDay: 0,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 0,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+        excludedDays: [{ date: '2026-05-01', label: 'Swieto Pracy' }],
+      }),
+      makeWeekRow('2026-W19', { kmPerDay: 0 }),
+      makeWeekRow('2026-W20', { periodEnd: '2026-05-11', workingDays: 1, kmPerDay: 0 }),
     ],
   };
 
-  const MIXED_DTO = submitDto({ dateStart: '2026-04-27', dateEnd: '2026-05-10' });
+  const MIXED_DTO = submitDto({ dateStart: '2026-04-27', dateEnd: '2026-05-11' });
 
-  function aprilBoard(km: Record<string, number>): BoardDay[] {
-    return ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30'].map(
+  /** The board of the guaranteed week W18 (every calendar day): idle unless `km` names it. */
+  function w18Board(km: Record<string, number>): BoardDay[] {
+    return [
+      '2026-04-27',
+      '2026-04-28',
+      '2026-04-29',
+      '2026-04-30',
+      '2026-05-01',
+      '2026-05-02',
+      '2026-05-03',
+    ].map(
       (date): BoardDay =>
         km[date] === undefined
           ? { date, state: 'idle', km: null }
@@ -1463,24 +1460,32 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
     return { svc, daily };
   }
 
-  it('pays the guaranteed month on the board and persists mileageSource=board', async () => {
+  it('pays the guaranteed week on the board and persists mileageSource=board', async () => {
     const repoFake = makeRepo(null);
     const { svc, daily } = mixedService(
       repoFake,
-      aprilBoard({ '2026-04-27': 400, '2026-04-28': 400 }),
+      w18Board({ '2026-04-27': 400, '2026-04-28': 400 }),
     );
 
     const out = await svc.submit(makeAuth('przewoznik'), MIXED_DTO);
 
-    // 2_160 − 800 (board, April only) = 1_360 ⇒ 680 €. The declared 8_000 km
+    // 2_160 − 800 (board, W18 only) = 1_360 ⇒ 680 €. The declared 8_000 km
     // would have wiped the dopłata out entirely.
     expect(out.kmDifference).toBe(1_360);
     expect(out.paymentEur).toBe(680);
     const persisted = repoFake.creates[0]!.data;
     expect(persisted.breakdown.mileageSource).toBe('board');
     expect(persisted.breakdown.mileageEffective).toBe(800);
+    expect(persisted.breakdown.daysActive).toBe(4);
+    expect(persisted.breakdown.daysTotal).toBe(10);
+    // The persisted rows are the weekly ones the engine produced.
+    expect(persisted.breakdown.breakdown.map((w) => w.isoWeek)).toEqual([
+      '2026-W18',
+      '2026-W19',
+      '2026-W20',
+    ]);
     expect(persisted.origPaymentEur).toBe(680);
-    // The per-month board detail is live data — never persisted.
+    // The per-week board detail is live data — never persisted.
     expect('board' in persisted.breakdown).toBe(false);
     // `mileage` / `drivenDays` / `kmPerDay` stay the declared, full-period facts.
     expect(persisted.mileage).toBe(8_000);
@@ -1491,7 +1496,7 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
     expect(daily.boardSpy).toHaveBeenCalledWith(
       'v-1',
       new Date('2026-04-27T00:00:00.000Z'),
-      new Date('2026-05-11T00:00:00.000Z'),
+      new Date('2026-05-12T00:00:00.000Z'),
     );
     expect(daily.sumSpy).not.toHaveBeenCalled();
   });
@@ -1500,7 +1505,7 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
     const repoFake = makeRepo(null);
     const { svc } = mixedService(
       repoFake,
-      aprilBoard({ '2026-04-27': 400 }).filter((d) => d.date !== '2026-04-30'),
+      w18Board({ '2026-04-27': 400 }).filter((d) => d.date !== '2026-04-30'),
     );
 
     const out = await svc.submit(makeAuth('przewoznik'), MIXED_DTO);
@@ -1512,7 +1517,7 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
 
   it('no under-run on the board ⇒ the mixed wording, without quoting the carrier or board figure', async () => {
     const repoFake = makeRepo(null);
-    const { svc } = mixedService(repoFake, aprilBoard({ '2026-04-27': 3_000 }));
+    const { svc } = mixedService(repoFake, w18Board({ '2026-04-27': 3_000 }));
 
     let caught: unknown;
     try {
@@ -1522,7 +1527,7 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
     }
     const v = readViolation(caught);
     expect(v!.violations).toEqual([
-      'W miesiącach objętych gwarancją przebieg jest równy lub wyższy niż km ' +
+      'W tygodniach objętych gwarancją przebieg jest równy lub wyższy niż km ' +
         'gwarantowane (2160). Brak podstaw do dopłaty.',
     ]);
     expect(repoFake.creates).toHaveLength(0);

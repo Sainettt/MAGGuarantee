@@ -22,7 +22,7 @@ import type {
   ClaimStatus,
   KmCalcBreakdown,
   KmCalcResult,
-  MonthLimit,
+  RecalcLimitsChangedWeek,
   RecalcLimitsFigures,
   RecalcLimitsPreviewDto,
   PreviewClaimDto,
@@ -33,6 +33,8 @@ import type {
   SubmitReklamacjaDto,
   UpdateClaimDto,
   VerifyClaimDto,
+  WeekBreakdown,
+  WeekLimit,
 } from '@magguarantee/shared';
 import {
   businessDateIso,
@@ -281,11 +283,14 @@ export class ClaimsService {
    *  1. the period counted no days at all (weekend/holiday-only, invalid
    *     range) → the generic legacy wording; the duration gate already
    *     explains the real problem right above it;
-   *  2. every month of the period carries an explicit `0` → the guarantee was
-   *     deliberately switched off (feature «wyłączane limity», 2026-09-20);
-   *  3. at least one month has NO `MonthlyLimit` row → nothing is configured;
-   *     the global fallback only fires for months with no row, so this is an
+   *  2. every ISO week of the period carries an explicit `0` → the guarantee
+   *     was deliberately switched off (feature «wyłączane limity», 2026-09-20);
+   *  3. at least one week has NO `WeeklyLimit` row → nothing is configured;
+   *     the global fallback only fires for weeks with no row, so this is an
    *     admin task, not a carrier one.
+   *
+   * The texts speak of "this period" (`okres`), never of a month or a week,
+   * so they read the same whatever the limits unit is.
    */
   private async _noGuaranteeViolation(
     settlement: ClaimSettlement,
@@ -322,9 +327,9 @@ export class ClaimsService {
    * Turn a km-calc result + the declared mileage into the settled numbers
    * (`kmDifference` / `paymentEur` / `mileageEffective` / `mileageSource`).
    *
-   *  - every month of the period active ⇒ the board is NOT queried and the
+   *  - every ISO week of the period active ⇒ the board is NOT queried and the
    *    output is bit-identical to the pre-feature `kmGuaranteed − mileage`;
-   *  - some month with `kmPerDay = 0` (docs/20 §0⁵) ⇒ the vehicle's board rows
+   *  - some week with `kmPerDay = 0` (docs/20 §0⁵) ⇒ the vehicle's board rows
    *    over the period are loaded and the payout is settled on them. No vehicle
    *    (legacy row) or no board repository ⇒ an EMPTY board: every counted day
    *    is reported missing, nothing is guessed.
@@ -383,7 +388,7 @@ export class ClaimsService {
   /**
    * Was this wniosek last priced as a MIXED period (settled on the board)?
    * Read off the persisted breakdown: the explicit `mileageSource` when present,
-   * else the month rows themselves (rows written before the field existed).
+   * else the week rows themselves (rows written before the field existed).
    * A legacy / empty breakdown ⇒ `false`.
    */
   private _storedOnBoard(claim: ClaimRow): boolean {
@@ -397,7 +402,7 @@ export class ClaimsService {
    * Assemble the `KmCalcBreakdown` envelope persisted on `Claim.breakdown`
    * and returned by `/preview`. Carries the engine output plus the settlement
    * summary (`daysActive` / `daysTotal` / `mileageEffective` /
-   * `mileageSource`). The per-month board detail is deliberately NOT persisted
+   * `mileageSource`). The per-week board detail is deliberately NOT persisted
    * — the board is live data, served as `boardSettlement` on read.
    */
   private _buildBreakdown(
@@ -414,13 +419,13 @@ export class ClaimsService {
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
       // Credited fraction of the period's first/last calendar day (RAW, pre
-      // `hoursAdjusted`) — so the "Miesiąc" block can show exactly how much of
+      // `hoursAdjusted`) — so the breakdown block can show exactly how much of
       // each boundary day was counted without re-deriving the walk.
       firstDay: calc.firstDay,
       lastDay: calc.lastDay,
-      // Settlement summary — `mileageSource: 'board'` ⇒ some month of the
+      // Settlement summary — `mileageSource: 'board'` ⇒ some ISO week of the
       // period has `kmPerDay = 0` and `mileageEffective` is the board sum over
-      // the counted days of the guaranteed months, not the declared mileage.
+      // the counted days of the guaranteed weeks, not the declared mileage.
       daysActive: settlement.daysActive,
       daysTotal: settlement.daysTotal,
       mileageEffective: settlement.mileageEffective,
@@ -431,9 +436,10 @@ export class ClaimsService {
   /**
    * The limits SNAPSHOT a wniosek was originally priced with, rebuilt from its
    * persisted `Claim.breakdown`. Feeding it back into km-calc is what makes a
-   * recalc of an EXISTING wniosek immune to retroactive `PUT /limits/:yearMonth`
-   * edits (business decision 2026-09-20). `undefined` for legacy/empty
-   * breakdowns ⇒ the live limits are used, which is the pre-feature behaviour.
+   * recalc of an EXISTING wniosek immune to retroactive `PUT /limits/:isoWeek`
+   * edits (business decision 2026-09-20). Keyed `YYYY-Www` (limits per ISO
+   * week since 2026-10-29). `undefined` for legacy/empty breakdowns ⇒ the
+   * live limits are used, which is the pre-feature behaviour.
    *
    * Deliberately NOT used by `submit` (the snapshot is BORN there) nor by
    * `POST /claims/:nrZgl/recalc-limits` (whose entire purpose is adopting the
@@ -441,7 +447,7 @@ export class ClaimsService {
    */
   private _limitsSnapshot(
     claim: ClaimRow,
-  ): Record<string, MonthLimit> | undefined {
+  ): Record<string, WeekLimit> | undefined {
     const snapshot = limitsSnapshotFromBreakdown(claim.breakdown);
     return Object.keys(snapshot).length > 0 ? snapshot : undefined;
   }
@@ -731,7 +737,7 @@ export class ClaimsService {
       tier2.push(duration.message);
     }
 
-    // Settlement pass — a period with a switched-off month is settled on the
+    // Settlement pass — a period with a switched-off week is settled on the
     // outing vehicle's daily-km board (docs/20 §0⁵), whatever it holds right
     // now; a day the weryfikator has not recorded yet (typically the return
     // day) simply counts 0 km here and blocks the ACCEPT later, not the submit.
@@ -769,7 +775,7 @@ export class ClaimsService {
       // the sentence states the outcome without numbers from the board.
       tier2.push(
         settlement.mileageSource === 'board'
-          ? `W miesiącach objętych gwarancją przebieg jest równy lub wyższy ` +
+          ? `W tygodniach objętych gwarancją przebieg jest równy lub wyższy ` +
               `niż km gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`
           : `Km zrealizowane (${mileage}) są równe lub wyższe niż km ` +
               `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
@@ -1046,7 +1052,7 @@ export class ClaimsService {
     // `limitsSnapshot` freezes the limits the wniosek was priced with: an
     // outing-driven period shift must not also adopt retroactively edited
     // limits (the explicit `POST /claims/:nrZgl/recalc-limits` does that).
-    // Months the shift moved INTO are not in the snapshot and are priced live.
+    // Weeks the shift moved INTO are not in the snapshot and are priced live.
     const calc = await this.kmCalc.calc({
       dateStart: toIsoDateOnly(dateStart),
       dateEnd: toIsoDateOnly(dateEnd),
@@ -1242,8 +1248,8 @@ export class ClaimsService {
 
   /**
    * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the LIVE
-   * `monthly_limits`, deliberately ignoring the limits snapshot frozen in its
-   * `breakdown`.
+   * `weekly_limits`, deliberately ignoring the limits snapshot frozen in its
+   * `breakdown` (docs/13-api-design.md, Claims table).
    *
    * Why it exists: every recalc of an existing wniosek is pinned to the limits
    * it was submitted under (`_limitsSnapshot`), so an admin who FIXES a wrongly
@@ -1316,11 +1322,29 @@ export class ClaimsService {
    * the route. It runs the SAME `_computeLimitsRefresh` the write path runs
    * (one formula, no drift) and applies the SAME status gate, so a frozen
    * wniosek is refused before the dialog opens rather than after.
+   *
+   * Besides the five money/day figures it lists the ISO weeks whose limits
+   * the refresh would change (`changedWeeks`, docs/14 §18.8) — the stored
+   * breakdown rows (the frozen snapshot) against the fresh calc, paired by
+   * `isoWeek`. `changed` stays the five-figure comparison (the contract of
+   * `RecalcLimitsPreviewSchema`), so a limit edit that moves no figure can
+   * list a week while `changed` is `false`.
    */
   async previewLimitsRefresh(nrZgl: string): Promise<RecalcLimitsPreviewDto> {
     const existing = await this._loadForLimitsRefresh(nrZgl);
-    const { next } = await this._computeLimitsRefresh(existing);
+    const { next, weeks } = await this._computeLimitsRefresh(existing);
     const current = this._limitsFigures(existing);
+    const diff = diffWeekLimits(existing.breakdown?.breakdown, weeks);
+    if (diff.unmatchedWeeks.length > 0) {
+      // Only a legacy / malformed `Claim.breakdown` lacks a week of its own
+      // period (every write path persists a breakdown over the persisted
+      // period). Such a week cannot be compared, so it is listed nowhere.
+      this.logger.warn({
+        msg: 'claims.limitsRefresh.preview.week_without_snapshot',
+        nrZgl: existing.nrZgl,
+        isoWeeks: diff.unmatchedWeeks,
+      });
+    }
 
     return {
       changed: (
@@ -1328,6 +1352,8 @@ export class ClaimsService {
       ).some((k) => next[k] !== current[k]),
       current,
       next,
+      changedWeeks: diff.changedWeeks,
+      unchangedWeekCount: diff.unchangedWeekCount,
     };
   }
 
@@ -1344,8 +1370,9 @@ export class ClaimsService {
   }
 
   /**
-   * Re-price a wniosek against TODAY's `monthly_limits` and return both the
-   * persistable patch and the flat figure block the dry run compares.
+   * Re-price a wniosek against TODAY's `weekly_limits` and return the
+   * persistable patch, the flat figure block the dry run compares and the
+   * fresh per-week rows (`weeks`, for the dry run's `changedWeeks`).
    *
    * Single source of the refresh math — `refreshLimits` persists the patch,
    * `previewLimitsRefresh` throws it away. Nothing here writes.
@@ -1353,9 +1380,10 @@ export class ClaimsService {
   private async _computeLimitsRefresh(claim: ClaimRow): Promise<{
     patch: UpdateClaimData;
     next: RecalcLimitsFigures;
+    weeks: readonly WeekBreakdown[];
   }> {
     // NOTE the absent `limitsSnapshot` — these are the ONLY km-calc calls on an
-    // existing wniosek that intentionally read today's `monthly_limits`.
+    // existing wniosek that intentionally read today's `weekly_limits`.
     const dateStart = toIsoDateOnly(claim.dateStart);
     const dateEnd = toIsoDateOnly(claim.dateEnd);
     const calc = await this.kmCalc.calc({
@@ -1392,6 +1420,7 @@ export class ClaimsService {
         ratePerKmEffective: calc.ratePerKmEffective,
         drivenDays: calc.totalDays,
       },
+      weeks: calc.breakdown,
     };
   }
 
@@ -2403,7 +2432,7 @@ export class ClaimsService {
     const { kmDifference, paymentEur } = settlement;
 
     // Staff inspecting an existing wniosek (`allowMileageOverride` is the
-    // verifier gate) get the per-month board detail of a mixed period and the
+    // verifier gate) get the per-week board detail of a mixed period and the
     // board TOTAL over the previewed period (the ClaimModal's «Wg tablicy
     // przebiegów» hint). The carrier paths never carry either key.
     const staffBoard =
@@ -3150,7 +3179,7 @@ export class ClaimsService {
    * and for an all-active period (`recalc.board === null`). The recalc is
    * always present here: an accept of a mixed period is force-re-priced.
    *
-   *  - 422 `CLAIM_BOARD_INCOMPLETE` — a counted day of a guaranteed month has
+   *  - 422 `CLAIM_BOARD_INCOMPLETE` — a counted day of a guaranteed week has
    *    no board row; `extensions.missingDates` lists them.
    *  - 422 `CLAIM_BOARD_CHANGED` — the live dopłata differs from the one saved
    *    at verification, OR it is over the Maksim threshold and the gate was not
@@ -4189,7 +4218,7 @@ function isoToDdMmYyyy(iso: string): string {
 
 /**
  * 422 `CLAIM_BOARD_INCOMPLETE` — an accept of a mixed period while counted
- * days of a guaranteed month have no board row. The machine code and the
+ * days of a guaranteed ISO week have no board row. The machine code and the
  * ISO dates travel under `extensions` (the only keys `ProblemDetailsFilter`
  * forwards); the top-level `code` serves the in-process unit tests, same as
  * the sibling gates.
@@ -4203,7 +4232,7 @@ function boardIncompleteException(
     code: CLAIM_BOARD_INCOMPLETE,
     message:
       `Nie można zaakceptować wniosku — brak przebiegu na tablicy km za ${n} ` +
-      `${n === 1 ? 'dzień' : 'dni'} w miesiącach z gwarancją: ${dates}. ` +
+      `${n === 1 ? 'dzień' : 'dni'} w tygodniach z gwarancją: ${dates}. ` +
       `Poczekaj, aż weryfikator uzupełni dane.`,
     extensions: { code: CLAIM_BOARD_INCOMPLETE, missingDates: [...missingDates] },
   });
@@ -4223,10 +4252,128 @@ function toBoardSettlementDto(
     mileageEffective: settlement.mileageEffective,
     kmDifference: settlement.kmDifference,
     paymentEur: settlement.paymentEur,
-    months: settlement.board.months,
+    weeks: settlement.board.weeks,
     missingDates: settlement.board.missingDates,
     complete: settlement.board.complete,
   };
+}
+
+// ─── Limits-refresh dry run: per-week diff ───────────────
+
+/** One side ("było" / "będzie") of a week in `RecalcLimitsPreviewDto.changedWeeks`. */
+type WeekLimitFigures = RecalcLimitsChangedWeek['current'];
+
+/** A persisted breakdown row narrowed to what the diff compares. */
+interface StoredWeekFigures extends WeekLimitFigures {
+  isoWeek: string;
+}
+
+/** Result of {@link diffWeekLimits}. */
+interface WeekLimitsDiff {
+  /** Weeks whose limits differ, ascending by `isoWeek`. */
+  changedWeeks: RecalcLimitsChangedWeek[];
+  /** Weeks present on both sides with identical limits. */
+  unchangedWeekCount: number;
+  /** Fresh weeks the stored breakdown has no row for (legacy / malformed row). */
+  unmatchedWeeks: string[];
+}
+
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Index the persisted `Claim.breakdown.breakdown` rows by `isoWeek`. The DB
+ * read path does not run Zod, so the rows are narrowed defensively: a row
+ * needs a string `isoWeek` plus finite `kmPerDay` + `ratePerKm` (exactly what
+ * `limitsSnapshotFromBreakdown` requires to freeze a week); a missing
+ * `kmPerSaturday` / `kmInWeek` reads as `0` (the engine's Saturday fold).
+ * Anything else — e.g. a pre-2026-10-29 monthly row — is skipped.
+ */
+function indexStoredWeeks(rows: unknown): Map<string, StoredWeekFigures> {
+  const out = new Map<string, StoredWeekFigures>();
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows as readonly unknown[]) {
+    if (row === null || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const kmPerDay = finiteOrNull(r.kmPerDay);
+    const ratePerKm = finiteOrNull(r.ratePerKm);
+    if (typeof r.isoWeek !== 'string' || kmPerDay === null || ratePerKm === null) {
+      continue;
+    }
+    out.set(r.isoWeek, {
+      isoWeek: r.isoWeek,
+      kmPerDay,
+      ratePerKm,
+      kmPerSaturday: finiteOrNull(r.kmPerSaturday) ?? 0,
+      kmInWeek: finiteOrNull(r.kmInWeek) ?? 0,
+    });
+  }
+  return out;
+}
+
+function weekFigures(row: WeekLimitFigures): WeekLimitFigures {
+  return {
+    kmPerDay: row.kmPerDay,
+    ratePerKm: row.ratePerKm,
+    kmPerSaturday: row.kmPerSaturday,
+    kmInWeek: row.kmInWeek,
+  };
+}
+
+/**
+ * `changedWeeks` / `unchangedWeekCount` of the limits-refresh dry run
+ * (docs/13 `GET /claims/:nrZgl/recalc-limits/preview`, docs/14 §18.8).
+ *
+ * Pairs the STORED breakdown rows (the limits snapshot the wniosek carries)
+ * with the FRESH rows computed from today's `weekly_limits` by `isoWeek`. A
+ * refresh never moves the period, so both sides cover the same weeks. A week
+ * is "changed" when any of the three LIMITS differs — `kmPerDay`, `ratePerKm`
+ * or `kmPerSaturday`; `kmInWeek` is reported on both sides but does not by
+ * itself make a week changed (a `hoursAdjusted` share moving between weeks is
+ * a consequence, not a limit edit). `periodStart` / `periodEnd` are the
+ * week's days inside the claim period, from the fresh row.
+ *
+ * Pure — no IO, never throws.
+ */
+function diffWeekLimits(
+  stored: unknown,
+  fresh: readonly WeekBreakdown[],
+): WeekLimitsDiff {
+  const before = indexStoredWeeks(stored);
+  // `YYYY-Www` keys sort chronologically as plain strings (code-unit order).
+  const ordered = [...fresh].sort((a, b) =>
+    a.isoWeek < b.isoWeek ? -1 : a.isoWeek > b.isoWeek ? 1 : 0,
+  );
+  const diff: WeekLimitsDiff = {
+    changedWeeks: [],
+    unchangedWeekCount: 0,
+    unmatchedWeeks: [],
+  };
+
+  for (const row of ordered) {
+    const prev = before.get(row.isoWeek);
+    if (prev === undefined) {
+      diff.unmatchedWeeks.push(row.isoWeek);
+      continue;
+    }
+    const same =
+      prev.kmPerDay === row.kmPerDay &&
+      prev.ratePerKm === row.ratePerKm &&
+      prev.kmPerSaturday === row.kmPerSaturday;
+    if (same) {
+      diff.unchangedWeekCount += 1;
+      continue;
+    }
+    diff.changedWeeks.push({
+      isoWeek: row.isoWeek,
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+      current: weekFigures(prev),
+      next: weekFigures(row),
+    });
+  }
+  return diff;
 }
 
 /**

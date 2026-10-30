@@ -59,7 +59,7 @@ export function CarrierSubmittedEmail({
 }: CarrierSubmittedProps): React.ReactElement {
   // `!= null`, NOT truthiness — a real `0` (guarantee switched off for the
   // period, no shortfall) must render as "0 km", not vanish. See
-  // docs/19-known-quirks.md#monthlyLimit-fallback.
+  // docs/19-known-quirks.md#weeklyLimit-fallback.
   const hasKm = kmGuaranteed != null || kmDriven != null || kmShortfall != null;
   return (
     <MailLayout

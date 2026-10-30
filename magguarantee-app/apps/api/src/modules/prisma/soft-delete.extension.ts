@@ -40,7 +40,7 @@ import { Prisma } from '@magguarantee/database';
  *
  * Excluded models: AuditLog (append-only), RefreshToken (hard-delete by
  * `expiresAt`), AppConfig (singletons), TrailerType (toggled via `active`),
- * ClaimSequence (counter row), MonthlyLimit (no deletedAt column),
+ * ClaimSequence (counter row), MonthlyLimit + WeeklyLimit (no deletedAt column),
  * ClaimAttachment (no deletedAt column — never soft-deleted).
  *
  * Recursion note (the bug fixed alongside the attachment-model addition): a

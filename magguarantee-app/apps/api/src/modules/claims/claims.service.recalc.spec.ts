@@ -37,6 +37,7 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
   return {
@@ -66,7 +67,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       breakdown: [],
       firstDay: null,
       lastDay: null,
-      // Settlement fields (2026-09-20): every month of this fixture has its
+      // Settlement fields (2026-09-20): every week of this fixture has its
       // guarantee ON, so the active day count equals the total.
       daysActive: 10,
       daysTotal: 10,
@@ -631,6 +632,8 @@ describe('delegation auto-recalc — limits snapshot', () => {
   const RETURN = new Date('2026-05-12T00:00:00.000Z');
 
   it('re-prices with the limits the wniosek was SUBMITTED under, not today\'s', async () => {
+    // Stored period 01.05 (Fri, W18) – 09.05 (Sat, W19); the return on 12.05
+    // stretches it into W20.
     const { service, kmCalcSpy } = build({
       claim: makeClaim({
         breakdown: {
@@ -639,18 +642,12 @@ describe('delegation auto-recalc — limits snapshot', () => {
           kmGuaranteed: 5_400,
           ratePerKmEffective: 0.5,
           breakdown: [
-            {
-              yearMonth: '2026-05',
-              workingDays: 10,
-              kmPerDay: 540,
-              ratePerKm: 0.5,
-              saturdaysCounted: 0,
-              kmPerSaturday: 0,
-              kmFromSaturdays: 0,
-              kmInMonth: 5_400,
-              saturdayDays: [],
-              excludedDays: [],
-            },
+            makeWeekRow('2026-W18', { periodStart: '2026-05-01', workingDays: 5 }),
+            makeWeekRow('2026-W19', {
+              periodEnd: '2026-05-09',
+              workingDays: 5,
+              kmPerSaturday: 270,
+            }),
           ],
           firstDay: null,
           lastDay: null,
@@ -666,10 +663,11 @@ describe('delegation auto-recalc — limits snapshot', () => {
       limitsSnapshot?: Record<string, unknown>;
     };
     expect(input.limitsSnapshot).toEqual({
-      '2026-05': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W18': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W19': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 },
     });
-    // A month the period may have grown INTO is absent → priced live.
-    expect(input.limitsSnapshot!['2026-06']).toBeUndefined();
+    // A week the period has grown INTO is absent → priced live.
+    expect(input.limitsSnapshot!['2026-W20']).toBeUndefined();
   });
 
   it('a legacy wniosek with no breakdown falls back to the live limits', async () => {
@@ -699,37 +697,16 @@ describe('delegation auto-recalc — limits snapshot', () => {
   });
 
   it('a mixed NEW period is settled on the claim vehicle\'s board over that period', async () => {
-    // 25.05–05.06.2026: May guaranteed (25–29 = 5 × 540 = 2700 km), June off.
+    // 25.05–05.06.2026: W22 (Mon 25.05 – Sun 31.05) guaranteed (5 × 540 =
+    // 2700 km), W23 (Mon 01.06 – Fri 05.06 inside the period) switched off.
     const { service, updateSpy, boardSpy } = build({
       claim: makeClaim({ dateStart: new Date('2026-05-25T00:00:00.000Z') }),
       kmResult: {
         totalDays: 10,
         kmGuaranteed: 2_700,
         breakdown: [
-          {
-            yearMonth: '2026-05',
-            workingDays: 5,
-            kmPerDay: 540,
-            ratePerKm: 0.5,
-            saturdaysCounted: 0,
-            kmPerSaturday: 0,
-            kmFromSaturdays: 0,
-            kmInMonth: 2_700,
-            saturdayDays: [],
-            excludedDays: [],
-          },
-          {
-            yearMonth: '2026-06',
-            workingDays: 5,
-            kmPerDay: 0,
-            ratePerKm: 0.5,
-            saturdaysCounted: 0,
-            kmPerSaturday: 0,
-            kmFromSaturdays: 0,
-            kmInMonth: 0,
-            saturdayDays: [],
-            excludedDays: [],
-          },
+          makeWeekRow('2026-W22'),
+          makeWeekRow('2026-W23', { periodEnd: '2026-06-05', kmPerDay: 0 }),
         ],
       },
       droveSum: 9_000,
@@ -741,7 +718,7 @@ describe('delegation auto-recalc — limits snapshot', () => {
         { date: '2026-05-29', state: 'idle', km: null },
         { date: '2026-05-30', state: 'idle', km: null },
         { date: '2026-05-31', state: 'idle', km: null },
-        // June is switched off — its kilometres are never charged.
+        // W23 is switched off — its kilometres are never charged.
         { date: '2026-06-01', state: 'drove', km: 7_000 },
       ],
     });
@@ -759,7 +736,7 @@ describe('delegation auto-recalc — limits snapshot', () => {
     const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
     expect(patch.breakdown?.mileageSource).toBe('board');
     expect(patch.breakdown?.mileageEffective).toBe(1_000);
-    // 2_700 − 1_000 (May on the board) = 1_700 ⇒ 850 €; the re-prefilled
+    // 2_700 − 1_000 (W22 on the board) = 1_700 ⇒ 850 €; the re-prefilled
     // declared 9_000 no longer decides the payout.
     expect(patch.mileage).toBe(9_000);
     expect(patch.kmDifference).toBe(1_700);

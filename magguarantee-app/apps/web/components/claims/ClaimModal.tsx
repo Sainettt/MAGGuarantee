@@ -2203,7 +2203,7 @@ function InTransitGateBlock() {
 // offers `ZAAKCEPTOWANO` — it removes one option, it does not block the whole
 // decision like the Maksim / in-transit blocks do. Surface recipe of
 // `progExceededHint` (0 new tokens). Dates come from the TOP-LEVEL
-// `missingDates` (guaranteed months only), sorted defensively, formatted as
+// `missingDates` (guaranteed weeks only), sorted defensively, formatted as
 // LOCAL calendar days with the year.
 
 function BoardGapNotice({

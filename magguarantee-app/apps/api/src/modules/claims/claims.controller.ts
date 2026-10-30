@@ -277,9 +277,11 @@ export class ClaimsController {
    * audit-coverage spec only requires it on mutating verbs). Carries the SAME
    * status gate, so a frozen wniosek 422s before the dialog opens.
    *
-   * Response: `RecalcLimitsPreviewDto` — `{ changed, current, next }`,
-   * deliberately NOT a `ClaimDto` (nothing was written, so there is no claim
-   * state to hand back). Gate: `claims.verify`, the same as the write.
+   * Response: `RecalcLimitsPreviewDto` — `{ changed, current, next,
+   * changedWeeks, unchangedWeekCount }` (the ISO weeks of the period whose
+   * limits the refresh would change, docs/14 §18.8), deliberately NOT a
+   * `ClaimDto` (nothing was written, so there is no claim state to hand
+   * back). Gate: `claims.verify`, the same as the write.
    */
   @Get(':nrZgl/recalc-limits/preview')
   @RequirePermission('claims.verify')
@@ -291,7 +293,7 @@ export class ClaimsController {
 
   /**
    * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the CURRENT
-   * `monthly_limits`, ignoring the limits snapshot frozen in its breakdown.
+   * `weekly_limits`, ignoring the limits snapshot frozen in its breakdown.
    *
    * Every other recalc path is pinned to the limits the wniosek was submitted
    * under, so a corrected limit never reaches filed wnioski by itself. This is

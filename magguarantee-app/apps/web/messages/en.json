@@ -39,7 +39,16 @@
     "clearFilters": "Clear filters",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
-    "refreshHint": "Click to refresh data"
+    "refreshHint": "Click to refresh data",
+    "isoWeek": {
+      "short": "Wk {week}",
+      "full": "Week {week}",
+      "withRange": "Wk {week} · {from}–{to}",
+      "withDay": "Wk {week} · {day}",
+      "fullWithRange": "Week {week} · {from}–{to}",
+      "count": "{count, plural, one {# week} other {# weeks}}",
+      "fullWeekTitle": "Full week: {from}–{to}"
+    }
   },
   "formActive": {
     "vehicleConsequence": "An inactive vehicle disappears from selection lists and can't be used in new departures or claims.",
@@ -1473,7 +1482,7 @@
         },
         "boardGate": {
           "title": "{count, plural, =0 {No data on the km board} one {No data for # day} other {No data for # days}}",
-          "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed months. The claim can be accepted only once the data is complete; it can be rejected at any time.",
+          "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed weeks. The claim can be accepted only once the data is complete; it can be rejected at any time.",
           "datesLabel": "Days without mileage on the km board",
           "showAll": "Show all ({count})",
           "showLess": "Show less",
@@ -1484,10 +1493,10 @@
           "changedHintNoEdit": "The compensation amount changed since the verification was saved — an administrator must save the verification again."
         },
         "shortfall": {
-          "line": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
+          "line": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
           "formula": "Shortfall: {guaranteed} guaranteed km − {driven} {scope, select, board {km per verifier} other {km driven}} = {km} km × {rate} €/km",
-          "metEqual": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
-          "metOver": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
+          "metEqual": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
+          "metOver": "{scope, select, board {In the guaranteed weeks the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
         },
         "linkedDelegation": {
           "heading": "Linked trip",
@@ -1613,7 +1622,15 @@
           "confirm": "Apply the new amounts",
           "loading": "Recalculating…",
           "success": "Recalculated with current limits",
-          "error": "Could not recalculate the claim"
+          "error": "Could not recalculate the claim",
+          "changedWeeks": "Changed limits ({count, plural, one {# week} other {# weeks}})",
+          "unchangedWeeks": "{count, plural, one {The other week is unchanged.} other {The other # weeks are unchanged.}}",
+          "showAll": "Show all ({count})",
+          "showLess": "Show less",
+          "fieldKmPerDay": "Km/day",
+          "fieldSaturday": "Saturday",
+          "fieldRate": "€/km",
+          "valueOff": "off"
         }
       }
     }
@@ -1981,7 +1998,7 @@
         "kmGuaranteed": "Guaranteed km",
         "payment": "Guarantee payout",
         "submitReklamacja": "Submit reclamation",
-        "monthlyBreakdown": "Monthly breakdown",
+        "weeklyBreakdown": "Weekly breakdown",
         "details": "Details",
         "amountRequested": "Amount requested",
         "amountApproved": "Amount approved",
@@ -2075,13 +2092,14 @@
       "paymentEur": "Guarantee payout (EUR)"
     },
     "breakdown": {
-      "month": "Month",
+      "week": "Week",
       "workingDays": "Work days",
       "kmPerDay": "Km/day",
+      "saturday": "Sat.",
       "ratePerKm": "€/km",
-      "kmInMonth": "Km/mo",
-      "saturdays": "Saturdays",
-      "saturdaysDetail": "{count} × {perSaturday} = {total} km",
+      "kmInWeek": "Km/wk",
+      "saturdayNoneTitle": "No Saturday guarantee this week",
+      "saturdayNotCountedTitle": "Guaranteed Saturday not counted — outside the claim period or an excluded day.",
       "empty": "No data to break down",
       "totalKmGuaranteed": "Total (guaranteed km)",
       "excludedDays": "Excluded days (holidays / EU ban)",
@@ -2098,20 +2116,22 @@
       "boundaryExcluded": "{value} days · not counted",
       "boundaryHint": "Boundary days are credited in proportion to the departure and arrival times.",
       "guaranteeDisabled": "Guarantee disabled",
-      "guaranteeSaturdayOnly": "Saturdays only",
-      "rateNoneTitle": "No rate — the guarantee is disabled for this month",
-      "mixedPeriodNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
-      "boardNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed months count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
+      "guaranteeSaturdayOnly": "Saturday only",
+      "guaranteeDisabledShort": "Off",
+      "guaranteeSaturdayOnlyShort": "Sat. only",
+      "rateNoneTitle": "No rate — the guarantee is disabled for this week",
+      "mixedPeriodNotice": "The period includes {count, plural, one {a week} other {weeks}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
+      "boardNotice": "The period includes {count, plural, one {a week} other {weeks}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed weeks count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
       "boardKm": "Km per verifier",
       "boardDays": "Days entered",
       "boardDaysValue": "{filled} of {required}",
       "boardSaturdaysValue": "{filled} of {required} Sat.",
       "boardDaysMissingSr": "no data for {count, plural, one {# day} other {# days}}",
-      "boardOffTitle": "Not counted — the guarantee is disabled for this month",
+      "boardOffTitle": "Not counted — the guarantee is disabled for this week",
       "total": "Total",
       "boardTotalKm": "Total (km per verifier)",
       "allDisabledTitle": "No guarantee in this period",
-      "allDisabledBody": "The mileage guarantee is disabled for every month of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
+      "allDisabledBody": "The mileage guarantee is disabled for every week of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
     },
     "reklamacja": {
       "sheetTitle": "Submit reclamation",

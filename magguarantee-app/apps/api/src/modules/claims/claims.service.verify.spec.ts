@@ -43,6 +43,7 @@ import type {
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
 import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 // ─── helpers ─────────────────────────────────────────────────
 
@@ -76,24 +77,17 @@ function makeBreakdown(): KmCalcBreakdown {
     rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
+    // One row per ISO week of 01.04–20.04.2026 (W14 … W17), 540 km/day, no
+    // Saturday guarantee. Hand-rolled: 5 counted days each keeps the round 20.
     breakdown: [
-      {
-        yearMonth: '2026-04',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        // Odd-Saturday feature OFF in this fixture (no kmPerSaturday).
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10_800,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+      makeWeekRow('2026-W14', { periodStart: '2026-04-01' }),
+      makeWeekRow('2026-W15'),
+      makeWeekRow('2026-W16'),
+      makeWeekRow('2026-W17', { periodEnd: '2026-04-20' }),
     ],
     firstDay: null,
     lastDay: null,
-    // Settlement fields (2026-09-20): every month of this fixture has its
+    // Settlement fields (2026-09-20): every week of this fixture has its
     // guarantee ON, so the active day count equals the total.
     daysActive: 20,
     daysTotal: 20,
@@ -1443,9 +1437,13 @@ describe('ClaimsService.verifyClaim — `_recalcClaim` limits snapshot', () => {
     const input = km.calls[0]!.input as {
       limitsSnapshot?: Record<string, unknown>;
     };
-    // `makeBreakdown()` carries 2026-04 @ 540 km/day, 0.5 EUR/km.
+    // `makeBreakdown()` carries W14 … W17 of 2026 @ 540 km/day, 0.5 EUR/km.
+    const week = { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 };
     expect(input.limitsSnapshot).toEqual({
-      '2026-04': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W14': week,
+      '2026-W15': week,
+      '2026-W16': week,
+      '2026-W17': week,
     });
   });
 
@@ -1461,39 +1459,23 @@ describe('ClaimsService.verifyClaim — mixed period settled on the board', () =
     jest.useRealTimers();
   });
 
-  // The spec example: 21.08–18.09.2025, August switched off (7 counted days),
-  // September on (14 × 540 = 7560 km @ 0.50 €/km). drivenDays 21 ⇒ Maksim
+  // The spec example per ISO week: 21.08–18.09.2025. W34 (from Thu 21.08) and
+  // W35 switched off — the 7 counted August days; W36, W37 and W38 (to Thu
+  // 18.09) on — 14 × 540 = 7560 km @ 0.50 €/km. drivenDays 21 ⇒ Maksim
   // threshold 500 €.
-  const AUGUST_OFF = {
-    yearMonth: '2025-08',
-    workingDays: 7,
-    kmPerDay: 0,
-    ratePerKm: 0.5,
-    saturdaysCounted: 0,
-    kmPerSaturday: 0,
-    kmFromSaturdays: 0,
-    kmInMonth: 0,
-    saturdayDays: [],
-    excludedDays: [],
-  };
-  const SEPTEMBER_ON = {
-    yearMonth: '2025-09',
-    workingDays: 14,
-    kmPerDay: 540,
-    ratePerKm: 0.5,
-    saturdaysCounted: 0,
-    kmPerSaturday: 0,
-    kmFromSaturdays: 0,
-    kmInMonth: 7_560,
-    saturdayDays: [],
-    excludedDays: [],
-  };
+  const MIXED_WEEKS = [
+    makeWeekRow('2025-W34', { periodStart: '2025-08-21', workingDays: 2, kmPerDay: 0 }),
+    makeWeekRow('2025-W35', { kmPerDay: 0 }),
+    makeWeekRow('2025-W36'),
+    makeWeekRow('2025-W37'),
+    makeWeekRow('2025-W38', { periodEnd: '2025-09-18', workingDays: 4 }),
+  ];
   const MIXED_CALC: Partial<KmCalcResult> = {
     totalDays: 21,
     rawTotalDays: 21,
     kmGuaranteed: 7_560,
     ratePerKmEffective: 0.5,
-    breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+    breakdown: MIXED_WEEKS,
   };
 
   /** A wniosek last priced as a mixed period (board still empty at submit). */
@@ -1512,7 +1494,7 @@ describe('ClaimsService.verifyClaim — mixed period settled on the board', () =
         rawTotalDays: 21,
         kmGuaranteed: 7_560,
         ratePerKmEffective: 0.5,
-        breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+        breakdown: MIXED_WEEKS,
         firstDay: null,
         lastDay: null,
         daysActive: 14,
@@ -1566,9 +1548,14 @@ describe('ClaimsService.verifyClaim — mixed period settled on the board', () =
     expect(input.dateEnd).toBe('2025-09-18');
     // NOT the `?? 0` of the correction path — the forced refresh keeps 4 h.
     expect(input.hoursAdjusted).toBe(4);
+    const off = { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 };
+    const on = { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 };
     expect(input.limitsSnapshot).toEqual({
-      '2025-08': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
-      '2025-09': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W34': off,
+      '2025-W35': off,
+      '2025-W36': on,
+      '2025-W37': on,
+      '2025-W38': on,
     });
     expect(board.boardSpy).toHaveBeenCalledWith(
       'v-1',
@@ -1701,7 +1688,7 @@ describe('ClaimsService.verifyClaim — mixed period settled on the board', () =
     expect(patch.breakdown?.mileageEffective).toBe(7_400);
     expect(patch.kmDifference).toBe(160);
     expect(patch.paymentEur).toBe(80);
-    // Day counters keep their meaning (August's 7 days are not active).
+    // Day counters keep their meaning (the 7 days of W34–W35 are not active).
     expect(patch.breakdown?.daysActive).toBe(14);
     expect(patch.breakdown?.daysTotal).toBe(21);
   });

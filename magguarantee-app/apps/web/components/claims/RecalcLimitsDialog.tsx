@@ -24,13 +24,27 @@
 //
 // It is a plain <Dialog>, not a <ConfirmDialog>: the latter can only carry a
 // string, and the whole point here is the two-column table.
+//
+// Weekly limits (§18.8, 2026-10-29): money first — the decision is about the
+// amount — then ONLY the weeks of the period whose limits changed: the week
+// label (clipped to the period, as in the breakdown) with «Km/tydz.» było →
+// będzie, and a second line naming the limit values that moved («Km/dz. 540 →
+// 500 · Sobota 300 → 400»). Unchanged weeks are one line. More than 6 changed
+// weeks collapse to the first 5 + «Pokaż wszystkie (N)». Deltas carry no
+// semantic colour (§16.6). The dialog is `max-w-lg` and scrolls inside itself
+// once the expanded list outgrows the viewport.
 
-import { RefreshCw } from 'lucide-react';
+import { ArrowRight, RefreshCw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import { toast } from 'sonner';
-import type { ClaimDto } from '@magguarantee/shared';
+import type {
+  ClaimDto,
+  RecalcLimitsChangedWeek,
+  RecalcLimitsWeekFigures,
+} from '@magguarantee/shared';
 
+import IsoWeekLabel from '@/components/claims/IsoWeekLabel';
 import { Button } from '@/components/ui/Button';
 import {
   Dialog,
@@ -41,7 +55,15 @@ import {
 } from '@/components/ui/Dialog';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ApiResponseError } from '@/lib/api/client';
-import { deriveRecalcDialogView } from '@/lib/claims/recalcLimitsDialogState';
+import {
+  changedLimitFields,
+  deriveRecalcDialogView,
+  isChangedWeeksCollapsible,
+  sortChangedWeeks,
+  visibleChangedWeeks,
+  weekKmChanged,
+  type WeekLimitField,
+} from '@/lib/claims/recalcLimitsDialogState';
 import { formatEur } from '@/lib/format/numbers';
 import {
   useRecalcClaimLimits,
@@ -58,6 +80,14 @@ function formatInt(value: number): string {
   return new Intl.NumberFormat('pl-PL', { maximumFractionDigits: 0 }).format(
     value,
   );
+}
+
+/** A week's €/km — up to 4 decimals (a limit may be 0,4750). */
+function formatRate(value: number): string {
+  return new Intl.NumberFormat('pl-PL', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(value);
 }
 
 /** Signed EUR delta — no semantic colour: a smaller payout is not an error. */
@@ -132,7 +162,7 @@ export default function RecalcLimitsDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('dialogTitle')}</DialogTitle>
           <DialogDescription>{t('dialogBody')}</DialogDescription>
@@ -186,6 +216,13 @@ export default function RecalcLimitsDialog({
 
         {view.showToZero && (
           <p className="mt-2 text-xs text-text-sub">{t('toZero')}</p>
+        )}
+
+        {view.showWeeks && preview && (
+          <ChangedWeeks
+            weeks={preview.changedWeeks}
+            unchangedCount={preview.unchangedWeekCount}
+          />
         )}
 
         {view.errorMessage && (
@@ -260,5 +297,135 @@ function ComparisonRow({
         )}
       </td>
     </tr>
+  );
+}
+
+// ── Changed weeks (§18.8) ────────────────────────────────────────────
+
+/** `→` — decorative icon + the shared sr-only «zmiana na» / «changes to». */
+function ChangeArrow() {
+  const tBulk = useTranslations('limits.bulk');
+  return (
+    <>
+      <ArrowRight size={12} aria-hidden className="shrink-0 text-text-sub" />
+      <span className="sr-only"> {tBulk('arrowSr')} </span>
+    </>
+  );
+}
+
+function ChangedWeeks({
+  weeks,
+  unchangedCount,
+}: {
+  weeks: readonly RecalcLimitsChangedWeek[];
+  unchangedCount: number;
+}) {
+  const t = useTranslations('employee.claims.modal.recalcLimits');
+  const headingId = useId();
+  const listId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  const sorted = sortChangedWeeks(weeks);
+  const shown = visibleChangedWeeks(sorted, expanded);
+  const collapsible = isChangedWeeksCollapsible(sorted.length);
+
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="mt-5 border-t border-border pt-4"
+    >
+      <h3
+        id={headingId}
+        className="text-xs font-bold uppercase tracking-wider text-text-sub"
+      >
+        {t('changedWeeks', { count: sorted.length })}
+      </h3>
+      <ul id={listId} className="mt-2 space-y-2.5">
+        {shown.map((week) => (
+          <ChangedWeekItem key={week.isoWeek} week={week} />
+        ))}
+      </ul>
+      {collapsible && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1.5 py-1 text-xs font-semibold text-text underline-offset-2 hover:underline"
+        >
+          {expanded ? t('showLess') : t('showAll', { count: sorted.length })}
+        </button>
+      )}
+      {unchangedCount > 0 && (
+        <p className="mt-2 text-xs text-text-sub">
+          {t('unchangedWeeks', { count: unchangedCount })}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ChangedWeekItem({ week }: { week: RecalcLimitsChangedWeek }) {
+  const t = useTranslations('employee.claims.modal.recalcLimits');
+  const fields = changedLimitFields(week);
+
+  const fieldLabel: Record<WeekLimitField, string> = {
+    kmPerDay: t('fieldKmPerDay'),
+    kmPerSaturday: t('fieldSaturday'),
+    ratePerKm: t('fieldRate'),
+  };
+  // «Było» is never blank (§18.8): a switched-off weekday guarantee is «wył.»,
+  // a week without a Saturday guarantee is «—».
+  const formatField = (
+    field: WeekLimitField,
+    figures: RecalcLimitsWeekFigures,
+  ): string => {
+    const value = figures[field];
+    if (field === 'ratePerKm') return formatRate(value);
+    if (value === 0) return field === 'kmPerDay' ? t('valueOff') : '—';
+    return formatInt(value);
+  };
+
+  return (
+    <li>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+        <IsoWeekLabel
+          isoWeek={week.isoWeek}
+          periodStart={week.periodStart}
+          periodEnd={week.periodEnd}
+          className="text-text"
+        />
+        <span className="inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+          {weekKmChanged(week) ? (
+            <>
+              <span className="text-text-sub">
+                {formatInt(week.current.kmInWeek)}
+              </span>
+              <ChangeArrow />
+              <span className="font-semibold text-text">
+                {formatInt(week.next.kmInWeek)}
+              </span>
+            </>
+          ) : (
+            <span className="text-text">{formatInt(week.next.kmInWeek)}</span>
+          )}
+          <span className="text-text-sub">km</span>
+        </span>
+      </div>
+      {fields.length > 0 && (
+        <p className="mt-0.5 text-xs tabular-nums text-text-sub">
+          {fields.map((field, i) => (
+            <Fragment key={field}>
+              {i > 0 && ' · '}
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                {fieldLabel[field]} {formatField(field, week.current)}
+                <ChangeArrow />
+                {formatField(field, week.next)}
+              </span>
+            </Fragment>
+          ))}
+        </p>
+      )}
+    </li>
   );
 }

@@ -904,9 +904,10 @@ export class MailService implements IMailService {
         `Ciągnik: ${props.vehiclePlate}`,
         `Okres: ${props.periodFrom} → ${props.periodTo}`,
         // `!= null`, NOT truthiness: a legitimately ZERO figure ("0 km
-        // gwarantowanych" on a month whose guarantee is switched off, "0,00
+        // gwarantowanych" for a period whose guarantee is switched off, "0,00
         // EUR" dopłata) must still be printed — a silently missing line reads
-        // as "the system didn't compute it" (feature «wyłączane limity», 2026-09-20).
+        // as "the system didn't compute it" (feature «wyłączane limity», 2026-09-20;
+        // docs/19-known-quirks.md#weeklyLimit-fallback).
         ...(props.drivenDays != null
           ? [`Dni przepracowane: ${props.drivenDays}`]
           : []),

@@ -835,11 +835,11 @@ type UserDto = {
 // 2026-09-24 (docs/20 §0⁵, реализовано): «никогда не совпадают» больше не
 // верно — weryfikator берёт км из SpedTrans. Контракт запроса не меняется;
 // период с выключенным месяцем (`kmPerDay = 0`) оплачивается по km-доске
-// машины выезда за дни активных месяцев (`breakdown.mileageSource: 'board'`),
+// машины выезда за дни активных недель (`breakdown.mileageSource: 'board'`),
 // заявленный `mileage` на выплату там не влияет. Незаписанный день подачу не
 // блокирует (считается 0 км) — блокирует принятие (`CLAIM_BOARD_INCOMPLETE`).
 // Нарушение «нет недопробега» для такого периода не цитирует ни цифру
-// перевозчика, ни доску: «W miesiącach objętych gwarancją przebieg jest równy
+// перевозчика, ни доску: «W tygodniach objętych gwarancją przebieg jest równy
 // lub wyższy niż km gwarantowane (N). Brak podstaw do dopłaty.»
 type SubmitClaimRequest = {
   delegationId: string;    // chosen outing (MUST be `zjechal` — see status gate)
@@ -1159,7 +1159,7 @@ type UpdateClaimRequest =
 | Код | Когда |
 |---|---|
 | `REKLAMACJA_NOT_PENDING` | `targetStatus` = `REKLAMACJA_*`, но `existing.status !== 'REKLAMACJA'` (нет рекламации на рассмотрении). Проверяется **до** state-machine: `NA_WERYFIKACJI → ZAAKCEPTOWANO` — легальное ребро, и без этого гейта синтетический accept прошёл бы как свежий accept, минуя пересчёт и гейты. |
-| `CLAIM_BOARD_INCOMPLETE` | (2026-09-24, [20 §0⁵](20-phase-7-eksport-weryfikator.md)) `targetStatus = 'ZAAKCEPTOWANO'` на смешанном периоде, а у активных месяцев на km-доске есть дни без строки. `extensions: { code, missingDates: string[] }` (ISO, по возрастанию). Сообщение: «Nie można zaakceptować wniosku — brak przebiegu na tablicy km za N dzień/dni w miesiącach z gwarancją: dd.MM.yyyy, …. Poczekaj, aż weryfikator uzupełni dane.» |
+| `CLAIM_BOARD_INCOMPLETE` | (2026-09-24, [20 §0⁵](20-phase-7-eksport-weryfikator.md)) `targetStatus = 'ZAAKCEPTOWANO'` на смешанном периоде, а у активных недель на km-доске есть дни без строки. `extensions: { code, missingDates: string[] }` (ISO, по возрастанию). Сообщение: «Nie można zaakceptować wniosku — brak przebiegu na tablicy km za N dzień/dni w tygodniach z gwarancją: dd.MM.yyyy, …. Poczekaj, aż weryfikator uzupełni dane.» |
 | `CLAIM_BOARD_CHANGED` | (2026-09-24) `targetStatus = 'ZAAKCEPTOWANO'` на смешанном периоде, доска полная, но живая пересчитанная dopłata ≠ `paymentEur`, сохранённой при верификации (причина — изменения на km-доске **или** несохранённые корректировки, отправленные вместе с решением), **или** она над порогом Maksima, а гейт не взведён и не снят ровно на эту сумму (напр. верификацию сохраняли, пока были дыры, — гейт тогда пропускается). `extensions: { code }`. Сообщение: «Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie podejmij decyzję.» |
 
 **Область действия гейтов решения.** `CLAIM_NOT_VERIFIED`, `CLAIM_AUTHORIZATION_REQUIRED` (порог Maksima) и compensation-due guard («нет недопробега — нельзя акцептовать») применяются **только к свежим решениям** (`ZAAKCEPTOWANO`/`ODRZUCONO`), но **не** к разрешению рекламации: уznana рекламация платит фиксированную `reklamacjaAmount` (ограниченную при подаче), не зависящую от km-calc, — поэтому wniosek, отклонённый именно из-за `kmDifference ≤ 0`, может законно получить уznaną рекламацию. km-calc (`_recalcClaim`) на reklamacja-ветках **не запускается** — суммы заморожены. Board gates (`CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED`) и принудительный пересчёт по доске действуют **только** на `ZAAKCEPTOWANO` (и на «Zapisz weryfikację»); `ODRZUCONO` и рекламация их не видят.

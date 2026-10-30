@@ -165,7 +165,9 @@ export function uploadAuthorizationConfirmation(
  * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the limits refresh.
  *
  * Computes the five figures a refresh would move with the same code path as
- * the write, persists nothing and writes no audit row. Same roles
+ * the write — plus the weeks of the period whose limits changed
+ * (`changedWeeks`: limits and `kmInWeek` «było / będzie») and how many did not
+ * (`unchangedWeekCount`) — persists nothing and writes no audit row. Same roles
  * (`admin` / `pracownik`) and the SAME status gate as the write, so a 422
  * `CLAIM_LIMITS_REFRESH_BLOCKED` (with the server's Polish explanation)
  * arrives BEFORE anything is committed. This is what lets the confirmation
@@ -183,7 +185,7 @@ export function previewRecalcClaimLimits(
 
 /**
  * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the CURRENT
- * `monthly_limits` instead of the snapshot frozen into it at submission
+ * `weekly_limits` instead of the snapshot frozen into it at submission
  * (docs/14 §16.6). No body. Roles `admin` / `pracownik`.
  *
  * Rewrites kmGuaranteed / kmDifference / paymentEur / ratePerKmEffective /

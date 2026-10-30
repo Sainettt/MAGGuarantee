@@ -18,10 +18,12 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
-import type {
-  BoardDay,
-  KmCalcResult,
-  PreviewClaimDto,
+import {
+  calcKmGwarant,
+  FALLBACK_WEEK_LIMIT,
+  type BoardDay,
+  type KmCalcResult,
+  type PreviewClaimDto,
 } from '@magguarantee/shared';
 
 import type { AuditWriter } from '../audit/audit.service';
@@ -50,6 +52,7 @@ import type {
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
 import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 // ─── fixtures ────────────────────────────────────────────────
 
@@ -96,7 +99,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       breakdown: [],
       firstDay: null,
       lastDay: null,
-      // Settlement fields (2026-09-20): every month of this fixture has its
+      // Settlement fields (2026-09-20): every week of this fixture has its
       // guarantee ON, so the active day count equals the total.
       daysActive: 20,
       daysTotal: 20,
@@ -436,7 +439,7 @@ describe('ClaimsService.previewForExisting — multi-role gate', () => {
     expect(out.ratePerKmEffective).toBe(0.5);
     expect(out.breakdown.totalDays).toBe(20);
     // The preview must surface the engine's boundary-day credited fractions so
-    // the web "Miesiąc" block can render "ile z pierwszego / ostatniego dnia".
+    // the web breakdown block can render "ile z pierwszego / ostatniego dnia".
     expect(out.breakdown.firstDay).toEqual({ date: '2026-04-01', fraction: 0.67 });
     expect(out.breakdown.lastDay).toEqual({ date: '2026-04-20', fraction: 0.75 });
 
@@ -1089,24 +1092,17 @@ describe('preview — limits snapshot', () => {
     jest.useRealTimers();
   });
 
+  // 01.04–20.04.2026 touches W14 … W17; W16 was priced with a Saturday.
   const SNAPSHOT_BREAKDOWN = {
     totalDays: 20,
     rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
     breakdown: [
-      {
-        yearMonth: '2026-04',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10_800,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+      makeWeekRow('2026-W14', { periodStart: '2026-04-01' }),
+      makeWeekRow('2026-W15'),
+      makeWeekRow('2026-W16', { kmPerSaturday: 270, ratePerKm: 0.55 }),
+      makeWeekRow('2026-W17', { periodEnd: '2026-04-20' }),
     ],
     firstDay: null,
     lastDay: null,
@@ -1129,8 +1125,12 @@ describe('preview — limits snapshot', () => {
     const input = km.calls[0]!.input as {
       limitsSnapshot?: Record<string, unknown>;
     };
+    // One entry per stored ISO week, keyed `YYYY-Www`.
     expect(input.limitsSnapshot).toEqual({
-      '2026-04': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W14': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W15': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2026-W16': { kmPerDay: 540, ratePerKm: 0.55, kmPerSaturday: 270 },
+      '2026-W17': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
     });
   });
 
@@ -1191,38 +1191,20 @@ describe('preview — mixed period settled on the daily-km board', () => {
     jest.useRealTimers();
   });
 
-  // The spec example: 21.08–18.09.2025, August switched off (7 counted days),
-  // September on (14 × 540 = 7560 km @ 0.50 €/km).
+  // The spec example per ISO week: 21.08–18.09.2025 (Thu … Thu). W34
+  // (21–24.08) and W35 (25–31.08) switched off — the 7 counted August days;
+  // W36, W37 and W38 (to Thu 18.09) on — 14 × 540 = 7560 km @ 0.50 €/km.
   const MIXED_RESULT: KmCalcResult = {
     totalDays: 21,
     rawTotalDays: 21,
     kmGuaranteed: 7_560,
     ratePerKmEffective: 0.5,
     breakdown: [
-      {
-        yearMonth: '2025-08',
-        workingDays: 7,
-        kmPerDay: 0,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 0,
-        saturdayDays: [],
-        excludedDays: [],
-      },
-      {
-        yearMonth: '2025-09',
-        workingDays: 14,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 7_560,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+      makeWeekRow('2025-W34', { periodStart: '2025-08-21', workingDays: 2, kmPerDay: 0 }),
+      makeWeekRow('2025-W35', { kmPerDay: 0 }),
+      makeWeekRow('2025-W36'),
+      makeWeekRow('2025-W37'),
+      makeWeekRow('2025-W38', { periodEnd: '2025-09-18', workingDays: 4 }),
     ],
     firstDay: null,
     lastDay: null,
@@ -1260,7 +1242,22 @@ describe('preview — mixed period settled on the daily-km board', () => {
     return { svc, calls };
   }
 
-  it('pracownik: pays on the board (not on the declared mileage) and gets the per-month boardSettlement', async () => {
+  it('MIXED_RESULT is what the shared engine computes for the period (fixture sanity)', () => {
+    const engine = calcKmGwarant({
+      dateStart: '2025-08-21',
+      dateEnd: '2025-09-18',
+      limits: {
+        '2025-W34': { kmPerDay: 0, ratePerKm: 0.5 },
+        '2025-W35': { kmPerDay: 0, ratePerKm: 0.5 },
+      },
+      fallback: FALLBACK_WEEK_LIMIT,
+    });
+    expect(engine.breakdown).toEqual(MIXED_RESULT.breakdown);
+    expect(engine.kmGuaranteed).toBe(MIXED_RESULT.kmGuaranteed);
+    expect(engine.totalDays).toBe(MIXED_RESULT.totalDays);
+  });
+
+  it('pracownik: pays on the board (not on the declared mileage) and gets the per-week boardSettlement', async () => {
     const seeded = makeClaim({ mileage: 6_000 });
     const dailyKm = makeDailyKmRepo(0, septemberBoard(2_000));
     const svc = makeService(
@@ -1288,23 +1285,13 @@ describe('preview — mixed period settled on the daily-km board', () => {
       mileageEffective: 2_000,
       kmDifference: 5_560,
       paymentEur: 2_780,
-      months: [
-        {
-          yearMonth: '2025-08',
-          mode: 'off',
-          km: 0,
-          daysFilled: 0,
-          daysRequired: 0,
-          missingDates: [],
-        },
-        {
-          yearMonth: '2025-09',
-          mode: 'active',
-          km: 2_000,
-          daysFilled: 18,
-          daysRequired: 18,
-          missingDates: [],
-        },
+      weeks: [
+        { isoWeek: '2025-W34', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0, missingDates: [] },
+        { isoWeek: '2025-W35', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0, missingDates: [] },
+        // Active weeks require EVERY calendar day of week ∩ period.
+        { isoWeek: '2025-W36', mode: 'active', km: 2_000, daysFilled: 7, daysRequired: 7, missingDates: [] },
+        { isoWeek: '2025-W37', mode: 'active', km: 0, daysFilled: 7, daysRequired: 7, missingDates: [] },
+        { isoWeek: '2025-W38', mode: 'active', km: 0, daysFilled: 4, daysRequired: 4, missingDates: [] },
       ],
       missingDates: [],
       complete: true,
@@ -1318,7 +1305,7 @@ describe('preview — mixed period settled on the daily-km board', () => {
     );
   });
 
-  it('pracownik: a day missing in the active month is listed, the preview still prices', async () => {
+  it('pracownik: a day missing in an active week is listed, the preview still prices', async () => {
     const seeded = makeClaim();
     const svc = makeService(
       makeClaimsRepo([seeded]),
@@ -1336,6 +1323,12 @@ describe('preview — mixed period settled on the daily-km board', () => {
 
     expect(out.boardSettlement?.complete).toBe(false);
     expect(out.boardSettlement?.missingDates).toEqual(['2025-09-18']);
+    expect(out.boardSettlement?.weeks[4]).toMatchObject({
+      isoWeek: '2025-W38',
+      daysFilled: 3,
+      daysRequired: 4,
+      missingDates: ['2025-09-18'],
+    });
     expect(out.paymentEur).toBe(2_780);
   });
 
@@ -1470,8 +1463,11 @@ describe('preview — mixed period settled on the daily-km board', () => {
       hoursAdjusted: 3,
     });
     expect(input.limitsSnapshot).toEqual({
-      '2025-08': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
-      '2025-09': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W34': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W35': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W36': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W37': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-W38': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
     });
     expect(out.boardSettlement).toMatchObject({
       mileageEffective: 2_000,

@@ -1,50 +1,57 @@
-// How the breakdown reads switched-off months and a board-settled period
-// (docs/14 §16.5).
+// How the breakdown reads switched-off weeks, a week's Saturday and a
+// board-settled period (docs/14 §16.5, §18.7).
 
 import { describe, expect, it } from 'vitest';
 import type {
   ClaimBoardSettlement,
   KmCalcBreakdown,
-  MonthBreakdownDto,
-  SettlementBoardMonthDto,
+  SettlementBoardWeekDto,
+  WeekBreakdownDto,
 } from '@magguarantee/shared';
 
 import {
   analyzeBreakdown,
   boardCell,
   boardColumnTotalKm,
-  boardMonthIndex,
+  boardWeekIndex,
   formatBoardDate,
   isBoardIncomplete,
   isBoardSettled,
   isGhostRate,
   isMissingDatesCollapsible,
-  isMonthGuaranteeDisabled,
-  isMonthSaturdayOnly,
-  isMonthWeekdayGuaranteeOff,
+  isWeekGuaranteeDisabled,
+  isWeekSaturdayOnly,
+  isWeekdayGuaranteeOff,
   missesLastDay,
+  saturdayCell,
   sortMissingDates,
   visibleMissingDates,
+  weekGuaranteeMode,
 } from './breakdownGuarantee';
 
-function month(patch: Partial<MonthBreakdownDto> = {}): MonthBreakdownDto {
+/** A full active ISO week, 2026-W24 (08.06–14.06): 5 days × 540. */
+function week(patch: Partial<WeekBreakdownDto> = {}): WeekBreakdownDto {
   return {
-    yearMonth: '2026-02',
-    workingDays: 18,
+    isoWeek: '2026-W24',
+    weekStart: '2026-06-08',
+    weekEnd: '2026-06-14',
+    periodStart: '2026-06-08',
+    periodEnd: '2026-06-14',
+    workingDays: 5,
     kmPerDay: 540,
     ratePerKm: 0.5,
     saturdaysCounted: 0,
     kmPerSaturday: 0,
     kmFromSaturdays: 0,
-    kmInMonth: 9720,
     saturdayDays: [],
+    kmInWeek: 2700,
     excludedDays: [],
     ...patch,
   };
 }
 
 function envelope(
-  rows: MonthBreakdownDto[],
+  rows: WeekBreakdownDto[],
   patch: Partial<KmCalcBreakdown> = {},
 ): KmCalcBreakdown {
   return {
@@ -53,7 +60,7 @@ function envelope(
       0,
     ),
     rawTotalDays: 0,
-    kmGuaranteed: rows.reduce((acc, r) => acc + r.kmInMonth, 0),
+    kmGuaranteed: rows.reduce((acc, r) => acc + r.kmInWeek, 0),
     ratePerKmEffective: 0.5,
     breakdown: rows,
     firstDay: null,
@@ -64,73 +71,115 @@ function envelope(
   } as KmCalcBreakdown;
 }
 
-function boardMonth(
-  patch: Partial<SettlementBoardMonthDto> = {},
-): SettlementBoardMonthDto {
+function boardWeek(
+  patch: Partial<SettlementBoardWeekDto> = {},
+): SettlementBoardWeekDto {
   return {
-    yearMonth: '2025-09',
+    isoWeek: '2026-W24',
     mode: 'active',
     km: 2000,
-    daysFilled: 14,
-    daysRequired: 14,
+    daysFilled: 7,
+    daysRequired: 7,
     missingDates: [],
     ...patch,
   };
 }
 
 function board(
-  months: SettlementBoardMonthDto[],
+  weeks: SettlementBoardWeekDto[],
   patch: Partial<ClaimBoardSettlement> = {},
 ): ClaimBoardSettlement {
-  const missingDates = months.flatMap((m) => m.missingDates);
+  const missingDates = weeks.flatMap((w) => w.missingDates);
   return {
-    mileageEffective: months.reduce((acc, m) => acc + m.km, 0),
+    mileageEffective: weeks.reduce((acc, w) => acc + w.km, 0),
     kmDifference: 0,
     paymentEur: 0,
-    months,
+    weeks,
     missingDates,
     complete: missingDates.length === 0,
     ...patch,
   };
 }
 
-const activeMonth = month({ yearMonth: '2026-03', workingDays: 11 });
-const offMonth = month({
-  yearMonth: '2026-02',
-  workingDays: 7,
+const activeWeek = week({ isoWeek: '2026-W26', weekStart: '2026-06-22', weekEnd: '2026-06-28' });
+const offWeek = week({
+  isoWeek: '2026-W25',
+  weekStart: '2026-06-15',
+  weekEnd: '2026-06-21',
   kmPerDay: 0,
   kmPerSaturday: 0,
-  kmInMonth: 0,
+  kmInWeek: 0,
 });
-const saturdaysOnlyMonth = month({
-  yearMonth: '2026-04',
-  workingDays: 20,
+/** «Tylko sobota» whose Saturday WAS credited (300 km). */
+const saturdayOnlyWeek = week({
+  isoWeek: '2026-W27',
+  weekStart: '2026-06-29',
+  weekEnd: '2026-07-05',
   kmPerDay: 0,
   kmPerSaturday: 300,
-  saturdaysCounted: 2,
-  kmFromSaturdays: 600,
-  kmInMonth: 600,
+  saturdaysCounted: 1,
+  kmFromSaturdays: 300,
+  saturdayDays: ['2026-07-04'],
+  kmInWeek: 300,
+});
+/** «Tylko sobota» whose Saturday lies outside the period — still that mode. */
+const saturdayOnlyUncredited = week({
+  kmPerDay: 0,
+  kmPerSaturday: 300,
+  periodEnd: '2026-06-12',
+  kmInWeek: 0,
 });
 
-describe('month flags', () => {
-  it('disabled = weekdays off AND Saturdays off', () => {
-    expect(isMonthGuaranteeDisabled(offMonth)).toBe(true);
-    expect(isMonthGuaranteeDisabled(month())).toBe(false);
-    expect(isMonthGuaranteeDisabled(saturdaysOnlyMonth)).toBe(false);
+describe('week flags', () => {
+  it('disabled = weekdays off AND no Saturday guarantee', () => {
+    expect(isWeekGuaranteeDisabled(offWeek)).toBe(true);
+    expect(isWeekGuaranteeDisabled(week())).toBe(false);
+    expect(isWeekGuaranteeDisabled(saturdayOnlyWeek)).toBe(false);
   });
 
-  it('saturdayOnly = weekdays off but Saturdays credited', () => {
-    expect(isMonthSaturdayOnly(saturdaysOnlyMonth)).toBe(true);
-    expect(isMonthSaturdayOnly(month())).toBe(false);
-    expect(isMonthSaturdayOnly(month({ kmPerDay: 0, kmInMonth: 0 }))).toBe(
-      false,
-    );
+  it('saturdayOnly keys on the LIMIT, credited or not', () => {
+    expect(isWeekSaturdayOnly(saturdayOnlyWeek)).toBe(true);
+    expect(isWeekSaturdayOnly(saturdayOnlyUncredited)).toBe(true);
+    expect(isWeekSaturdayOnly(week())).toBe(false);
+    expect(isWeekSaturdayOnly(offWeek)).toBe(false);
+    // An active week with a Saturday guarantee is just active.
+    expect(isWeekSaturdayOnly(week({ kmPerSaturday: 300 }))).toBe(false);
   });
 
-  it('weekday guarantee off covers both the off and the Saturdays-only month', () => {
-    expect(isMonthWeekdayGuaranteeOff(offMonth)).toBe(true);
-    expect(isMonthWeekdayGuaranteeOff(saturdaysOnlyMonth)).toBe(true);
-    expect(isMonthWeekdayGuaranteeOff(activeMonth)).toBe(false);
+  it('weekday guarantee off covers both the off and the Saturday-only week', () => {
+    expect(isWeekdayGuaranteeOff(offWeek)).toBe(true);
+    expect(isWeekdayGuaranteeOff(saturdayOnlyWeek)).toBe(true);
+    expect(isWeekdayGuaranteeOff(activeWeek)).toBe(false);
+  });
+
+  it('weekGuaranteeMode picks exactly one marking', () => {
+    expect(weekGuaranteeMode(offWeek)).toBe('disabled');
+    expect(weekGuaranteeMode(saturdayOnlyWeek)).toBe('saturdayOnly');
+    expect(weekGuaranteeMode(saturdayOnlyUncredited)).toBe('saturdayOnly');
+    expect(weekGuaranteeMode(week({ kmPerSaturday: 300 }))).toBe('active');
+  });
+});
+
+describe('saturdayCell («Sob.»)', () => {
+  it('counted — the credited km', () => {
+    expect(saturdayCell(saturdayOnlyWeek)).toEqual({ status: 'counted', km: 300 });
+    expect(
+      saturdayCell(
+        week({ kmPerSaturday: 250, saturdaysCounted: 1, kmFromSaturdays: 250 }),
+      ),
+    ).toEqual({ status: 'counted', km: 250 });
+  });
+
+  it('notCounted — guaranteed Saturday outside the period / on a ban day', () => {
+    expect(saturdayCell(saturdayOnlyUncredited)).toEqual({
+      status: 'notCounted',
+      km: 0,
+    });
+  });
+
+  it('none — the week has no Saturday guarantee', () => {
+    expect(saturdayCell(week())).toEqual({ status: 'none', km: 0 });
+    expect(saturdayCell(offWeek)).toEqual({ status: 'none', km: 0 });
   });
 });
 
@@ -144,67 +193,74 @@ describe('ghost rate', () => {
 });
 
 describe('analyzeBreakdown', () => {
-  it('MIXED period = the server flag: notice on, counted off months', () => {
+  it('MIXED period = the server flag: notice on, counted off weeks', () => {
     const info = analyzeBreakdown(
-      envelope([offMonth, activeMonth], { mileageSource: 'board' }),
+      envelope([offWeek, activeWeek], { mileageSource: 'board' }),
     );
     expect(info.boardSettled).toBe(true);
     expect(info.showMixedNotice).toBe(true);
     expect(info.allDisabled).toBe(false);
-    expect(info.offMonthCount).toBe(1);
+    expect(info.offWeekCount).toBe(1);
   });
 
-  it('a Saturdays-only month switches the period onto the board and counts', () => {
+  it('a Saturday-only week switches the period onto the board and counts', () => {
     const info = analyzeBreakdown(
-      envelope([saturdaysOnlyMonth, activeMonth], { mileageSource: 'board' }),
+      envelope([offWeek, saturdayOnlyWeek, activeWeek], { mileageSource: 'board' }),
     );
     expect(info.showMixedNotice).toBe(true);
-    // Never 0 — the notice's plural must have a month to talk about.
-    expect(info.offMonthCount).toBe(1);
+    // Never 0 — the notice's plural must have a week to talk about.
+    expect(info.offWeekCount).toBe(2);
   });
 
-  it('an OLD proportional wniosek (mixed rows, no mileageSource) gets no notice', () => {
-    // Legacy envelopes really do arrive without the new keys — the client
-    // does not re-parse responses, so nothing backfills `mileageSource`.
-    const legacy = {
-      totalDays: 18,
-      rawTotalDays: 18,
-      kmGuaranteed: 5940,
+  it('absent mileageSource means declared — no notice, rows still marked', () => {
+    // The client does not re-parse responses, so nothing backfills the flag.
+    const unflagged = {
+      totalDays: 10,
+      rawTotalDays: 10,
+      kmGuaranteed: 2700,
       ratePerKmEffective: 0.5,
-      breakdown: [offMonth, activeMonth],
+      breakdown: [offWeek, activeWeek],
       firstDay: null,
       lastDay: null,
     } as unknown as KmCalcBreakdown;
-    const info = analyzeBreakdown(legacy);
+    const info = analyzeBreakdown(unflagged);
     expect(info.boardSettled).toBe(false);
     expect(info.showMixedNotice).toBe(false);
-    // The month is still recognised as off (badges / muting stay).
-    expect(info.offMonthCount).toBe(1);
+    expect(info.offWeekCount).toBe(1);
   });
 
   it("'declared' never shows the notice, even with mixed rows", () => {
     const info = analyzeBreakdown(
-      envelope([offMonth, activeMonth], { mileageSource: 'declared' }),
+      envelope([offWeek, activeWeek], { mileageSource: 'declared' }),
     );
     expect(info.showMixedNotice).toBe(false);
   });
 
   it('flags a period that is off end-to-end (empty state, no notice)', () => {
     const info = analyzeBreakdown(
-      envelope([offMonth], { mileageSource: 'board' }),
+      envelope([offWeek, week({ ...offWeek, isoWeek: '2026-W26' })], {
+        mileageSource: 'board',
+      }),
     );
     expect(info.allDisabled).toBe(true);
     expect(info.showMixedNotice).toBe(false);
   });
 
+  it('a Saturday-only week is not «all disabled» — it pays', () => {
+    const info = analyzeBreakdown(
+      envelope([offWeek, saturdayOnlyWeek], { mileageSource: 'board' }),
+    );
+    expect(info.allDisabled).toBe(false);
+  });
+
   it('an ordinary period triggers nothing', () => {
     const info = analyzeBreakdown(
-      envelope([activeMonth], { mileageSource: 'declared' }),
+      envelope([activeWeek], { mileageSource: 'declared' }),
     );
     expect(info.allDisabled).toBe(false);
     expect(info.boardSettled).toBe(false);
     expect(info.showMixedNotice).toBe(false);
-    expect(info.offMonthCount).toBe(0);
+    expect(info.offWeekCount).toBe(0);
   });
 
   it('an empty breakdown is not "all disabled"', () => {
@@ -226,36 +282,32 @@ describe('isBoardIncomplete', () => {
   it('only an explicit complete === false blocks', () => {
     expect(isBoardIncomplete(null)).toBe(false);
     expect(isBoardIncomplete(undefined)).toBe(false);
-    expect(isBoardIncomplete(board([boardMonth()]))).toBe(false);
+    expect(isBoardIncomplete(board([boardWeek()]))).toBe(false);
     expect(
       isBoardIncomplete(
-        board([
-          boardMonth({ daysFilled: 13, missingDates: ['2025-09-18'] }),
-        ]),
+        board([boardWeek({ daysFilled: 6, missingDates: ['2026-06-12'] })]),
       ),
     ).toBe(true);
     // Defensive: incomplete with an empty list still blocks.
-    expect(
-      isBoardIncomplete(board([boardMonth()], { complete: false })),
-    ).toBe(true);
+    expect(isBoardIncomplete(board([boardWeek()], { complete: false }))).toBe(true);
   });
 });
 
 describe('boardColumnTotalKm', () => {
   it('totals the LIVE board — the same source as the column rows', () => {
-    // Repro 2026-09: submitted while a September day had no row (priced on
-    // 4950), the weryfikator filled it later — the board now says 5450.
+    // Submitted while a day had no row (priced on 4950), the weryfikator
+    // filled it later — the board now says 5450.
     const live = board([
-      boardMonth({ yearMonth: '2026-08', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0 }),
-      boardMonth({ yearMonth: '2026-09', km: 5450, daysFilled: 18, daysRequired: 18 }),
+      boardWeek({ isoWeek: '2026-W25', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0 }),
+      boardWeek({ isoWeek: '2026-W26', km: 5450 }),
     ]);
-    const stale = envelope([offMonth, activeMonth], {
+    const stale = envelope([offWeek, activeWeek], {
       mileageSource: 'board',
       mileageEffective: 4950,
     });
     const total = boardColumnTotalKm(live);
     expect(total).toBe(5450);
-    expect(total).toBe(live.months.reduce((acc, m) => acc + m.km, 0));
+    expect(total).toBe(live.weeks.reduce((acc, w) => acc + w.km, 0));
     // Never the km the breakdown was last priced on.
     expect(total).not.toBe(stale.mileageEffective);
   });
@@ -266,58 +318,60 @@ describe('boardColumnTotalKm', () => {
   });
 });
 
-describe('boardMonthIndex + boardCell', () => {
+describe('boardWeekIndex + boardCell', () => {
   const settlement = board([
-    boardMonth({ yearMonth: '2025-08', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0 }),
-    boardMonth({ yearMonth: '2025-09', daysFilled: 13, missingDates: ['2025-09-18'] }),
-    boardMonth({ yearMonth: '2025-10', mode: 'saturdaysOnly', km: 700, daysFilled: 2, daysRequired: 2 }),
+    boardWeek({ isoWeek: '2026-W25', mode: 'off', km: 0, daysFilled: 0, daysRequired: 0 }),
+    boardWeek({ isoWeek: '2026-W26', daysFilled: 6, missingDates: ['2026-06-26'] }),
+    boardWeek({ isoWeek: '2026-W27', mode: 'saturdaysOnly', km: 350, daysFilled: 1, daysRequired: 1 }),
   ]);
-  const index = boardMonthIndex(settlement);
+  const index = boardWeekIndex(settlement);
 
-  it('joins by yearMonth', () => {
-    expect(index.get('2025-09')?.km).toBe(2000);
-    expect(index.get('2025-11')).toBeUndefined();
-    expect(boardMonthIndex(null).size).toBe(0);
+  it('joins by isoWeek', () => {
+    expect(index.get('2026-W26')?.km).toBe(2000);
+    expect(index.get('2026-W28')).toBeUndefined();
+    expect(boardWeekIndex(null).size).toBe(0);
   });
 
-  it('an off month is «—» with the off title', () => {
-    expect(boardCell(index.get('2025-08'))).toEqual({ kind: 'off' });
+  it('an off week is «—» with the off title', () => {
+    expect(boardCell(index.get('2026-W25'))).toEqual({ kind: 'off' });
   });
 
-  it('a month without a board pair is a plain «—»', () => {
-    expect(boardCell(index.get('2025-11'))).toEqual({ kind: 'none' });
+  it('a week without a board pair is a plain «—»', () => {
+    expect(boardCell(index.get('2026-W28'))).toEqual({ kind: 'none' });
   });
 
   it('nothing required ⇒ plain «—»', () => {
     expect(
-      boardCell(boardMonth({ mode: 'saturdaysOnly', daysRequired: 0, daysFilled: 0, km: 0 })),
+      boardCell(boardWeek({ mode: 'saturdaysOnly', daysRequired: 0, daysFilled: 0, km: 0 })),
     ).toEqual({ kind: 'none' });
   });
 
-  it('an incomplete active month carries the missing count', () => {
-    expect(boardCell(index.get('2025-09'))).toEqual({
+  it('an incomplete active week carries the missing count', () => {
+    expect(boardCell(index.get('2026-W26'))).toEqual({
       kind: 'value',
       km: 2000,
-      daysFilled: 13,
-      daysRequired: 14,
+      daysFilled: 6,
+      daysRequired: 7,
       saturdaysOnly: false,
       missing: 1,
     });
   });
 
-  it('a Saturdays-only month is labelled as Saturdays', () => {
-    expect(boardCell(index.get('2025-10'))).toMatchObject({
+  it('a Saturday-only week is labelled as its Saturday («1 z 1 sob.»)', () => {
+    expect(boardCell(index.get('2026-W27'))).toMatchObject({
       kind: 'value',
-      km: 700,
+      km: 350,
+      daysFilled: 1,
+      daysRequired: 1,
       saturdaysOnly: true,
       missing: 0,
     });
   });
 
   it('the missing count never goes negative', () => {
-    expect(
-      boardCell(boardMonth({ daysFilled: 15, daysRequired: 14 })),
-    ).toMatchObject({ missing: 0 });
+    expect(boardCell(boardWeek({ daysFilled: 8, daysRequired: 7 }))).toMatchObject({
+      missing: 0,
+    });
   });
 });
 

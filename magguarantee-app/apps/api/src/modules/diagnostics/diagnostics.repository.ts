@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 
 import { ClaimStatus as PrismaClaimStatus } from '@magguarantee/database';
 import {
+  formatIsoWeekKey,
   SLA_CLOCK_STATUSES,
   type ClaimStatus,
   type Role,
 } from '@magguarantee/shared';
 
+import { isoWeeksOfPeriod } from '../km-calc/km-calc.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -289,11 +291,12 @@ export class DiagnosticsRepository {
     //
     // ⚠️ SPLIT 2026-09-20 (feature «wyłączane limity gwarancji»). This used to
     // be ONE bucket labelled "missing limits at submit". Since `0` became a
-    // legal, deliberate `MonthlyLimit` value, a zero guarantee no longer
+    // legal, deliberate `WeeklyLimit` value, a zero guarantee no longer
     // implies a configuration hole — an admin may simply have switched the
-    // month off, and lumping both together would drown the real holes in
-    // false positives. We now partition the candidates by whether every month
-    // the claim's period touches actually HAS a `monthly_limits` row:
+    // week off, and lumping both together would drown the real holes in
+    // false positives. We now partition the candidates by whether every ISO
+    // week the claim's period touches actually HAS a `weekly_limits` row
+    // (per ISO week since 2026-10-29; per month before):
     //   - a missing row  ⇒ nothing configured  ⇒ admin action required;
     //   - all rows present ⇒ the zero is a decision ⇒ informational only.
     const zeroGuarantee = await this._claimsWithZeroGuarantee({
@@ -322,7 +325,7 @@ export class DiagnosticsRepository {
    * Candidate rows for the zero-guarantee buckets: stale `NA_WERYFIKACJI`
    * claims that were priced at 0 km. Newest-first, capped — this is a
    * diagnostics widget, not a report, and the cap keeps the follow-up
-   * per-claim month check bounded.
+   * per-claim week check bounded.
    */
   private async _claimsWithZeroGuarantee(args: {
     olderThan: Date;
@@ -340,13 +343,14 @@ export class DiagnosticsRepository {
   }
 
   /**
-   * Partition zero-guarantee claims into "some month of the period has NO
-   * `monthly_limits` row" (⇒ unconfigured) and "every month has one" (⇒ the
-   * zero is a deliberate switch-off).
+   * Partition zero-guarantee claims into "some ISO week of the period has NO
+   * `weekly_limits` row" (⇒ unconfigured) and "every week has one" (⇒ the
+   * zero is a deliberate switch-off) — the same per-week coverage rule as
+   * `KmCalcService.hasConfiguredLimits` behind the submit violation text.
    *
-   * One query for the whole limits table slice: `monthly_limits` holds at most
-   * a handful of rows per year, so loading the distinct `(year, month)` keys
-   * once and testing in memory beats N per-claim queries.
+   * One query for the keys of the years the candidates touch: `weekly_limits`
+   * holds at most 53 rows per ISO year, so loading the `(isoYear, isoWeek)`
+   * keys once and testing in memory beats N per-claim queries.
    */
   private async _splitByLimitsConfigured(
     claims: Array<{ id: string; dateStart: Date; dateEnd: Date }>,
@@ -355,21 +359,44 @@ export class DiagnosticsRepository {
     const disabled: string[] = [];
     if (claims.length === 0) return { missing, disabled };
 
-    const rows = await this.prisma.tx.monthlyLimit.findMany({
-      select: { year: true, month: true },
-    });
-    const configured = new Set(
-      rows.map((r) => `${r.year}-${String(r.month).padStart(2, '0')}`),
+    const weeksByClaim = claims.map((claim) => ({
+      id: claim.id,
+      weeks: claimWeekKeys(claim.dateStart, claim.dateEnd),
+    }));
+    const configured = await this._configuredWeekKeys(
+      weeksByClaim.flatMap((c) => c.weeks),
     );
 
-    for (const claim of claims) {
-      const allPresent = monthsBetweenUtc(claim.dateStart, claim.dateEnd).every(
-        (key) => configured.has(key),
-      );
+    for (const claim of weeksByClaim) {
+      // Inverted / unparseable range (shouldn't happen — CHECK constraint) ⇒
+      // no weeks ⇒ `every` is true ⇒ the informational bucket, not a crash.
+      const allPresent = claim.weeks.every((key) => configured.has(key));
       if (allPresent) disabled.push(claim.id);
       else missing.push(claim.id);
     }
     return { missing, disabled };
+  }
+
+  /**
+   * `YYYY-Www` keys of the `weekly_limits` rows in the ISO years of `weeks`.
+   * Existence of the row is what counts (docs/04-data-model.md) — the column
+   * values are not read.
+   */
+  private async _configuredWeekKeys(
+    weeks: readonly string[],
+  ): Promise<Set<string>> {
+    const years = [...new Set(weeks.map((key) => Number(key.slice(0, 4))))];
+    if (years.length === 0) return new Set();
+    const rows = await this.prisma.tx.weeklyLimit.findMany({
+      where: { isoYear: { in: years } },
+      select: { isoYear: true, isoWeek: true },
+    });
+    const keys = new Set<string>();
+    for (const r of rows) {
+      const key = formatIsoWeekKey(r.isoYear, r.isoWeek);
+      if (key !== null) keys.add(key);
+    }
+    return keys;
   }
 
   private async _sampleClaims(args: {
@@ -419,6 +446,7 @@ export class DiagnosticsRepository {
           'drivers',
           'trailers',
           'monthly_limits',
+          'weekly_limits',
           'delegations'
         )
       ORDER BY pg_total_relation_size(C.oid) DESC
@@ -438,26 +466,25 @@ export class DiagnosticsRepository {
 const ZERO_GUARANTEE_SCAN_CAP = 500;
 
 /**
- * `'YYYY-MM'` keys of every calendar month the (UTC) date range touches,
- * inclusive on both ends. Claim period columns are UTC-midnight `@db.Date`
- * values, so UTC getters are the right ones here.
+ * `YYYY-Www` keys of every ISO week a claim period touches, inclusive on both
+ * ends, ascending. Claim period columns are UTC-midnight `@db.Date` values, so
+ * the ISO slice IS the calendar day whatever the process `TZ`; the week walk
+ * itself is the shared, zone-independent one (`isoWeeksOfPeriod`).
+ *
+ * An inverted / unparseable range ⇒ `[]`, which the caller's `every` treats as
+ * "all configured" — the claim lands in the informational bucket rather than
+ * crashing the widget.
  */
-function monthsBetweenUtc(start: Date, end: Date): string[] {
+function claimWeekKeys(start: Date, end: Date): string[] {
+  const weeks = isoWeeksOfPeriod(
+    start.toISOString().slice(0, 10),
+    end.toISOString().slice(0, 10),
+  );
+  if (weeks === null) return [];
   const out: string[] = [];
-  let year = start.getUTCFullYear();
-  let month = start.getUTCMonth();
-  const endYear = end.getUTCFullYear();
-  const endMonth = end.getUTCMonth();
-  // Inverted range (shouldn't happen — CHECK constraint) ⇒ empty list, which
-  // `every` treats as "all configured"; the claim lands in the informational
-  // bucket rather than crashing the widget.
-  while (year < endYear || (year === endYear && month <= endMonth)) {
-    out.push(`${year}-${String(month + 1).padStart(2, '0')}`);
-    month += 1;
-    if (month > 11) {
-      month = 0;
-      year += 1;
-    }
+  for (const { isoYear, isoWeek } of weeks) {
+    const key = formatIsoWeekKey(isoYear, isoWeek);
+    if (key !== null) out.push(key);
   }
   return out;
 }

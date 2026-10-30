@@ -19,13 +19,13 @@
 //   kmDifference < 0                      → `metOver` with |kmDifference|
 //
 // `scope` = 'board' when the SOURCE's breakdown says `mileageSource: 'board'`
-// (mixed period — driven = the board total of the guaranteed months), else
+// (mixed period — driven = the board total of the guaranteed weeks), else
 // 'declared' (driven = the «Przebieg» after the pracownik's corrections).
 //
 // Numbers are pre-formatted strings (ICU gets them verbatim): km with up to 2
 // decimals (`mileageEffective` can carry cents — `formatInt` would visibly
 // disagree with the amount), the rate with 2–4 decimals (the effective rate of
-// a multi-month period need not be round). `pl-PL` in every locale, like the
+// a multi-week period need not be round). `pl-PL` in every locale, like the
 // breakdown table next to it.
 //
 // Pure, framework-free, unit-tested (`shortfall.test.ts`).

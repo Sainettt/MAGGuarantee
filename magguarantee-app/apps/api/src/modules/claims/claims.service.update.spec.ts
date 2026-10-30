@@ -56,6 +56,7 @@ import type {
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeWeekRow } from '../../common/testing/week-breakdown';
 
 /**
  * Open an `AuditContext` around a service call so the service's
@@ -102,24 +103,17 @@ function makeBreakdown(): KmCalcBreakdown {
     rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
+    // One row per ISO week of 01.04–20.04.2026 (W14 … W17), 540 km/day, no
+    // Saturday guarantee. Hand-rolled: 5 counted days each keeps the round 20.
     breakdown: [
-      {
-        yearMonth: '2026-04',
-        workingDays: 20,
-        kmPerDay: 540,
-        ratePerKm: 0.5,
-        // Odd-Saturday feature OFF in this fixture (no kmPerSaturday).
-        saturdaysCounted: 0,
-        kmPerSaturday: 0,
-        kmFromSaturdays: 0,
-        kmInMonth: 10_800,
-        saturdayDays: [],
-        excludedDays: [],
-      },
+      makeWeekRow('2026-W14', { periodStart: '2026-04-01' }),
+      makeWeekRow('2026-W15'),
+      makeWeekRow('2026-W16'),
+      makeWeekRow('2026-W17', { periodEnd: '2026-04-20' }),
     ],
     firstDay: null,
     lastDay: null,
-    // Settlement fields (2026-09-20): every month of this fixture has its
+    // Settlement fields (2026-09-20): every week of this fixture has its
     // guarantee ON, so the active day count equals the total.
     daysActive: 20,
     daysTotal: 20,
@@ -2080,7 +2074,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
 
 // ── ACCEPT of a mixed period — board gates (docs/20 §0⁵) ─────────────
 //
-// A period with a switched-off month is paid on the weryfikator's daily-km
+// A period with a switched-off week is paid on the weryfikator's daily-km
 // board AS IT STANDS AT THE DECISION. The accept therefore always re-prices
 // (forced recalc) and is refused while a counted day is missing
 // (CLAIM_BOARD_INCOMPLETE) or the live amount is not the one the verification
@@ -2095,38 +2089,22 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
     jest.useRealTimers();
   });
 
-  // 21.08–18.09.2025: August off (7 days), September 14 × 540 = 7560 km.
-  // drivenDays 21 ⇒ Maksim threshold 500 €.
-  const AUGUST_OFF = {
-    yearMonth: '2025-08',
-    workingDays: 7,
-    kmPerDay: 0,
-    ratePerKm: 0.5,
-    saturdaysCounted: 0,
-    kmPerSaturday: 0,
-    kmFromSaturdays: 0,
-    kmInMonth: 0,
-    saturdayDays: [],
-    excludedDays: [],
-  };
-  const SEPTEMBER_ON = {
-    yearMonth: '2025-09',
-    workingDays: 14,
-    kmPerDay: 540,
-    ratePerKm: 0.5,
-    saturdaysCounted: 0,
-    kmPerSaturday: 0,
-    kmFromSaturdays: 0,
-    kmInMonth: 7_560,
-    saturdayDays: [],
-    excludedDays: [],
-  };
+  // 21.08–18.09.2025 per ISO week: W34 (from Thu 21.08) and W35 off — the 7
+  // counted August days; W36, W37 and W38 (to Thu 18.09) on — 14 × 540 =
+  // 7560 km. drivenDays 21 ⇒ Maksim threshold 500 €.
+  const MIXED_WEEKS = [
+    makeWeekRow('2025-W34', { periodStart: '2025-08-21', workingDays: 2, kmPerDay: 0 }),
+    makeWeekRow('2025-W35', { kmPerDay: 0 }),
+    makeWeekRow('2025-W36'),
+    makeWeekRow('2025-W37'),
+    makeWeekRow('2025-W38', { periodEnd: '2025-09-18', workingDays: 4 }),
+  ];
   const MIXED_CALC: Partial<KmCalcResult> = {
     totalDays: 21,
     rawTotalDays: 21,
     kmGuaranteed: 7_560,
     ratePerKmEffective: 0.5,
-    breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+    breakdown: MIXED_WEEKS,
   };
 
   /** Verified mixed-period wniosek whose saved dopłata is `paymentEur`. */
@@ -2145,7 +2123,7 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
         rawTotalDays: 21,
         kmGuaranteed: 7_560,
         ratePerKmEffective: 0.5,
-        breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+        breakdown: MIXED_WEEKS,
         firstDay: null,
         lastDay: null,
         daysActive: 14,
@@ -2204,7 +2182,7 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
     return undefined;
   }
 
-  it('B1. gaps in an active month ⇒ 422 CLAIM_BOARD_INCOMPLETE with the dates, no writes', async () => {
+  it('B1. gaps in an active week ⇒ 422 CLAIM_BOARD_INCOMPLETE with the dates, no writes', async () => {
     const seeded = mixedClaim();
     const repoFake = makeClaimsRepo([seeded]);
     const svc = makeService(
@@ -2230,7 +2208,7 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
     });
     expect(body.message).toBe(
       'Nie można zaakceptować wniosku — brak przebiegu na tablicy km za 2 dni ' +
-        'w miesiącach z gwarancją: 07.09.2025, 18.09.2025. ' +
+        'w tygodniach z gwarancją: 07.09.2025, 18.09.2025. ' +
         'Poczekaj, aż weryfikator uzupełni dane.',
     );
     expect(repoFake.updateWithinCalls).toHaveLength(0);
@@ -2251,7 +2229,7 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
     const body = (caught as UnprocessableEntityException).getResponse() as {
       message?: string;
     };
-    expect(body.message).toContain('za 1 dzień w miesiącach z gwarancją: 18.09.2025.');
+    expect(body.message).toContain('za 1 dzień w tygodniach z gwarancją: 18.09.2025.');
   });
 
   it('B2. ODRZUCONO with gaps is NOT gated (and does not even re-price)', async () => {
