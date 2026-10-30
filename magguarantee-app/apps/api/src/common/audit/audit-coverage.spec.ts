@@ -103,18 +103,18 @@ describe('audit coverage — decorator presence on critical mutating endpoints',
       targetType: 'Claim',
     },
     {
-      name: 'PUT /limits/:yearMonth',
+      name: 'PUT /limits/:isoWeek',
       controller: LimitsController,
       method: 'upsert',
       action: 'limits.update',
-      targetType: 'MonthlyLimit',
+      targetType: 'WeeklyLimit',
     },
     {
       name: 'POST /limits/bulk',
       controller: LimitsController,
       method: 'bulkUpsert',
       action: 'limits.bulkUpdate',
-      targetType: 'MonthlyLimit',
+      targetType: 'WeeklyLimit',
     },
     {
       name: 'POST /claims/:nrZgl/recalc-limits',
@@ -255,53 +255,68 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
     expect(out.committed).toBe(true);
   });
 
-  it('PUT /limits/:yearMonth → limits.update row, targetKey=yearMonth', async () => {
+  it('PUT /limits/:isoWeek → limits.update row, targetKey = the `YYYY-Www` key', async () => {
     const out = await runAuditedHandler({
       controller: LimitsController,
       method: 'upsert',
       req: req({
-        params: { yearMonth: '2026-04' },
+        params: { isoWeek: '2026-W23' },
         method: 'PUT',
-        url: '/api/v1/limits/2026-04',
+        url: '/api/v1/limits/2026-W23',
       }),
-      result: { year: 2026, month: 4, kmPerDay: 500, ratePerKm: 0.9 },
+      result: { isoYear: 2026, isoWeek: 23, kmPerDay: 500, ratePerKm: 0.9 },
+      duringHandler: () =>
+        AuditContext.setBefore({ id: 'wl-1', isoYear: 2026, isoWeek: 23, kmPerDay: 540, ratePerKm: 0.9 }),
     });
 
     expect(out.entry!.action).toBe('limits.update');
-    expect(out.entry!.targetType).toBe('MonthlyLimit');
-    expect(out.entry!.targetKey).toBe('2026-04');
+    expect(out.entry!.targetType).toBe('WeeklyLimit');
+    expect(out.entry!.targetKey).toBe('2026-W23');
+    expect(out.entry!.before).toEqual({ id: 'wl-1', isoYear: 2026, isoWeek: 23, kmPerDay: 540, ratePerKm: 0.9 });
     expect(out.txOpens).toBe(1);
     expect(out.committed).toBe(true);
   });
 
-  it('POST /limits/bulk → limits.bulkUpdate row, targetKey = `YYYY-MM..MM`', async () => {
+  it('POST /limits/bulk → limits.bulkUpdate row, targetKey = `YYYY-Www..Www`, before + payload', async () => {
+    const body = { isoYear: 2026, weeks: [22, 10, 15], kmPerDay: 0 };
     const out = await runAuditedHandler({
       controller: LimitsController,
       method: 'bulkUpsert',
-      req: req({
-        method: 'POST',
-        url: '/api/v1/limits/bulk',
-        body: { year: 2026, months: [3, 1, 12], kmPerDay: 0 },
-      }),
+      req: req({ method: 'POST', url: '/api/v1/limits/bulk', body }),
       // The handler returns an ARRAY of rows — the interceptor keeps the
       // service's `before` object whole in that case (no key-trim).
-      result: [{ year: 2026, month: 1, kmPerDay: 0 }],
-      duringHandler: () =>
-        AuditContext.setBefore({ year: 2026, months: [1, 3, 12], rows: [] }),
+      result: [{ isoYear: 2026, isoWeek: 10, kmPerDay: 0 }],
+      duringHandler: () => {
+        AuditContext.setBefore({ isoYear: 2026, weeks: [10, 15, 22], rows: [] });
+        AuditContext.setMetadata({ payload: { isoYear: 2026, weeks: [10, 15, 22], kmPerDay: 0 } });
+      },
     });
 
     expect(out.entry!.action).toBe('limits.bulkUpdate');
-    expect(out.entry!.targetType).toBe('MonthlyLimit');
-    // Year + first/last month touched (months are sorted first).
-    expect(out.entry!.targetKey).toBe('2026-01..12');
-    expect(out.entry!.before).toEqual({
-      year: 2026,
-      months: [1, 3, 12],
-      rows: [],
+    expect(out.entry!.targetType).toBe('WeeklyLimit');
+    // ISO year + first/last week touched, whatever the body order.
+    expect(out.entry!.targetKey).toBe('2026-W10..W22');
+    expect(out.entry!.before).toEqual({ isoYear: 2026, weeks: [10, 15, 22], rows: [] });
+    expect(out.entry!.after).toEqual([{ isoYear: 2026, isoWeek: 10, kmPerDay: 0 }]);
+    expect(out.entry!.metadata).toMatchObject({
+      payload: { isoYear: 2026, weeks: [10, 15, 22], kmPerDay: 0 },
     });
-    // Bulk MUST be atomic — one ambient transaction for N months + audit row.
+    // Bulk MUST be atomic — one ambient transaction for N weeks + audit row.
     expect(out.txOpens).toBe(1);
     expect(out.committed).toBe(true);
+  });
+
+  it.each([
+    [{ isoYear: 2026, weeks: [5], kmPerSaturday: 0 }, '2026-W05..W05'],
+    [{ isoYear: 2026, weeks: [53, 1], ratePerKm: 0.5 }, '2026-W01..W53'],
+  ])('POST /limits/bulk targetKey for %j is %s', async (body, key) => {
+    const out = await runAuditedHandler({
+      controller: LimitsController,
+      method: 'bulkUpsert',
+      req: req({ method: 'POST', url: '/api/v1/limits/bulk', body }),
+      result: [],
+    });
+    expect(out.entry!.targetKey).toBe(key);
   });
 
   it('POST /claims/:nrZgl/recalc-limits → claim.limitsRefresh row with before/after', async () => {

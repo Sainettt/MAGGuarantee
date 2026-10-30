@@ -146,7 +146,7 @@
   "POST /vehicles/:id/deactivate": ["admin","opiekun"],
   "POST /vehicles/:id/planner-transfers": ["admin","opiekun","planista"],
   "POST /vehicles/:id/reactivate": ["admin","opiekun"],
-  "PUT /limits/:yearMonth": ["admin"],
+  "PUT /limits/:isoWeek": ["admin"],
   "PUT /sso/stanowisko-roles/:code": ["admin"],
   "PUT /vehicles/:id/daily-km": ["admin","weryfikator"]
 }

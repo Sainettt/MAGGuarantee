@@ -5,7 +5,7 @@ import { LimitsRepository } from './limits.repository';
 import { LimitsService } from './limits.service';
 
 /**
- * Phase 4.5 — Monthly limits admin module.
+ * Km limits admin module — per ISO week (`weekly_limits`) since 2026-10-29.
  *
  * Self-contained: only depends on `PrismaService` (provided globally via
  * `PrismaModule`) and the global `AuditWriter` (wired through the

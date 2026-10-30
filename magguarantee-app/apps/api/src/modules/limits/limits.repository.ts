@@ -7,156 +7,158 @@ import { PrismaService } from '../prisma/prisma.service';
  * as `number | null` so the service can map straight to the wire DTO without
  * a second hop through Prisma's `Decimal` runtime helper.
  */
-export interface MonthlyLimitRow {
+export interface WeeklyLimitRow {
   id: string;
-  year: number;
-  month: number;
+  /** ISO year — the calendar year of the week's Thursday. */
+  isoYear: number;
+  /** 1..52, or 1..53 in a 53-week ISO year. */
+  isoWeek: number;
   kmPerDay: number | null;
   ratePerKm: number | null;
-  /** Guarantee km per qualifying ("odd") Saturday; `null`/`0` ⇒ feature OFF. */
+  /** Guarantee km for this week's Saturday; `null`/`0` ⇒ the Saturday is not paid. */
   kmPerSaturday: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface UpsertMonthlyLimitData {
-  year: number;
-  month: number;
-  /** When `undefined`, the column is left untouched on UPDATE / NULL on INSERT. */
+/**
+ * The partial values of one limits write. A key that is ABSENT is not written:
+ * untouched on UPDATE, NULL on INSERT (docs/13 «Limits» — "bez zmian"). `0` is
+ * written as `0` ("switched off"). There is no way to write NULL.
+ */
+export interface WeeklyLimitValues {
   kmPerDay?: number;
   ratePerKm?: number;
-  /** When `undefined`, the column is left untouched on UPDATE / NULL on INSERT. */
   kmPerSaturday?: number;
 }
 
 /**
- * Read/write surface for `monthly_limits`. Wraps Prisma so the service never
- * touches `prisma.client.monthlyLimit` directly (api-agent guideline).
+ * Read/write surface for `weekly_limits` (km limits per ISO week, 2026-10-29).
+ * Wraps Prisma so the service never touches `prisma.weeklyLimit` directly
+ * (api-agent guideline).
  *
- * Goes through `this.prisma.tx` so audited PUTs land on the same ambient
- * transaction as the audit-row write (pre-Phase-4.4 atomic-audit pattern).
+ * Every call goes through `this.prisma.tx`, so audited writes land on the
+ * `AuditInterceptor`'s ambient transaction together with the audit row.
+ * Week existence (`isoWeek` ≤ weeks of `isoYear`) is NOT checked here — the DB
+ * has no CHECK for it either; the Zod schemas and the service own it.
  */
 @Injectable()
 export class LimitsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Return every monthly-limit row for the supplied year, ordered by month
-   * ascending. The frontend handles gap-filling for months without explicit
-   * data — no synthesised rows here.
+   * Every row of one ISO year, ascending by week. The frontend fills the weeks
+   * without a row in itself — no synthesised rows here.
    */
-  async listForYear(year: number): Promise<MonthlyLimitRow[]> {
-    const rows = await this.prisma.tx.monthlyLimit.findMany({
-      where: { year },
-      orderBy: { month: 'asc' },
+  async listForIsoYear(isoYear: number): Promise<WeeklyLimitRow[]> {
+    const rows = await this.prisma.tx.weeklyLimit.findMany({
+      where: { isoYear },
+      orderBy: { isoWeek: 'asc' },
     });
-    return rows.map((r) => this._toRow(r));
+    return rows.map(toRow);
+  }
+
+  /** One `(isoYear, isoWeek)` row, or `null` when the week has none. */
+  async findByWeek(isoYear: number, isoWeek: number): Promise<WeeklyLimitRow | null> {
+    const row = await this.prisma.tx.weeklyLimit.findUnique({
+      where: { isoYear_isoWeek: { isoYear, isoWeek } },
+    });
+    return row ? toRow(row) : null;
   }
 
   /**
-   * Look up a single `(year, month)` pair. Returns `null` when absent.
-   * Mirrors `findUnique` on the composite key.
-   */
-  async findByYearMonth(
-    year: number,
-    month: number,
-  ): Promise<MonthlyLimitRow | null> {
-    const row = await this.prisma.tx.monthlyLimit.findFirst({
-      where: { year, month },
-    });
-    return row ? this._toRow(row) : null;
-  }
-
-  /**
-   * Rows of one year restricted to the supplied months, ordered by month.
+   * Rows of one ISO year restricted to the given weeks, ascending by week.
    * Backs the `POST /limits/bulk` audit `before` snapshot (only the rows the
-   * bulk write will actually touch). An empty `months` list short-circuits.
+   * bulk write will actually touch). An empty `weeks` list short-circuits.
    */
-  async listForYearMonths(
-    year: number,
-    months: readonly number[],
-  ): Promise<MonthlyLimitRow[]> {
-    if (months.length === 0) return [];
-    const rows = await this.prisma.tx.monthlyLimit.findMany({
-      where: { year, month: { in: [...months] } },
-      orderBy: { month: 'asc' },
+  async listForWeeks(
+    isoYear: number,
+    weeks: readonly number[],
+  ): Promise<WeeklyLimitRow[]> {
+    if (weeks.length === 0) return [];
+    const rows = await this.prisma.tx.weeklyLimit.findMany({
+      where: { isoYear, isoWeek: { in: [...weeks] } },
+      orderBy: { isoWeek: 'asc' },
     });
-    return rows.map((r) => this._toRow(r));
+    return rows.map(toRow);
   }
 
   /**
-   * Apply ONE partial payload to several months of a single year. Each month
-   * goes through the same `upsert` as the single-row path, so the "omitted
-   * field ⇒ column untouched" contract is identical. Sequential on purpose:
-   * the calls share the ambient audit transaction (`prisma.tx`), and a
-   * Prisma interactive transaction is not safe to drive concurrently.
+   * Apply ONE partial payload to several weeks of a single ISO year; returns
+   * the rows after the write, ascending by week. Each week goes through the
+   * same `upsert` as the single-week path, so the "omitted key ⇒ column
+   * untouched" contract is identical. Sequential on purpose: the calls share
+   * the ambient audit transaction (`prisma.tx`), and a Prisma interactive
+   * transaction is not safe to drive concurrently.
    */
   async upsertMany(
-    year: number,
-    months: readonly number[],
-    data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>,
-  ): Promise<MonthlyLimitRow[]> {
-    const out: MonthlyLimitRow[] = [];
-    for (const month of [...months].sort((a, b) => a - b)) {
-      out.push(await this.upsert({ ...data, year, month }));
+    isoYear: number,
+    weeks: readonly number[],
+    values: WeeklyLimitValues,
+  ): Promise<WeeklyLimitRow[]> {
+    const out: WeeklyLimitRow[] = [];
+    for (const isoWeek of [...weeks].sort((a, b) => a - b)) {
+      out.push(await this.upsert(isoYear, isoWeek, values));
     }
     return out;
   }
 
   /**
-   * Upsert by composite `(year, month)` unique. INSERT path writes whichever
-   * fields the caller provided (the others remain NULL); UPDATE path patches
-   * only what the caller provided (the others remain untouched). The unique
-   * index `monthly_limits_year_month_key` keeps this atomic at the DB level.
+   * Upsert by the composite `(isoYear, isoWeek)` unique. INSERT writes the
+   * keys the caller provided (the rest stay NULL); UPDATE patches only those
+   * keys (the rest stay untouched). The unique index
+   * `weekly_limits_isoYear_isoWeek_key` keeps this atomic at the DB level.
    */
-  async upsert(data: UpsertMonthlyLimitData): Promise<MonthlyLimitRow> {
-    // Prisma's `upsert` needs explicit create/update payloads; we build them
-    // separately so the `undefined` semantics line up with the rest of the
-    // codebase (omit a field → don't write it).
-    const create: Record<string, unknown> = {
-      year: data.year,
-      month: data.month,
-    };
-    if (data.kmPerDay !== undefined) create.kmPerDay = data.kmPerDay;
-    if (data.ratePerKm !== undefined) create.ratePerKm = data.ratePerKm;
-    if (data.kmPerSaturday !== undefined) create.kmPerSaturday = data.kmPerSaturday;
-
-    const update: Record<string, unknown> = {};
-    if (data.kmPerDay !== undefined) update.kmPerDay = data.kmPerDay;
-    if (data.ratePerKm !== undefined) update.ratePerKm = data.ratePerKm;
-    if (data.kmPerSaturday !== undefined) update.kmPerSaturday = data.kmPerSaturday;
-
-    const row = await this.prisma.tx.monthlyLimit.upsert({
-      where: { year_month: { year: data.year, month: data.month } },
-      create: create as never,
-      update: update as never,
+  async upsert(
+    isoYear: number,
+    isoWeek: number,
+    values: WeeklyLimitValues,
+  ): Promise<WeeklyLimitRow> {
+    const data = pickLimitValues(values);
+    const row = await this.prisma.tx.weeklyLimit.upsert({
+      where: { isoYear_isoWeek: { isoYear, isoWeek } },
+      create: { isoYear, isoWeek, ...data },
+      update: data,
     });
-    return this._toRow(row);
+    return toRow(row);
   }
+}
 
-  // ── internals ──────────────────────────────────────────────
+/**
+ * Copy only the keys that carry a value (`0` included). A key present as
+ * `undefined` must not reach a column write or the audit payload — the whole
+ * contract hinges on "absent ⇒ untouched".
+ */
+export function pickLimitValues(values: WeeklyLimitValues): WeeklyLimitValues {
+  return {
+    ...(values.kmPerDay !== undefined ? { kmPerDay: values.kmPerDay } : {}),
+    ...(values.ratePerKm !== undefined ? { ratePerKm: values.ratePerKm } : {}),
+    ...(values.kmPerSaturday !== undefined
+      ? { kmPerSaturday: values.kmPerSaturday }
+      : {}),
+  };
+}
 
-  private _toRow(row: {
-    id: string;
-    year: number;
-    month: number;
-    kmPerDay: unknown;
-    ratePerKm: unknown;
-    kmPerSaturday?: unknown;
-    createdAt: Date;
-    updatedAt: Date;
-  }): MonthlyLimitRow {
-    return {
-      id: row.id,
-      year: row.year,
-      month: row.month,
-      kmPerDay: decimalToNumber(row.kmPerDay),
-      ratePerKm: decimalToNumber(row.ratePerKm),
-      kmPerSaturday: decimalToNumber(row.kmPerSaturday),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-  }
+function toRow(row: {
+  id: string;
+  isoYear: number;
+  isoWeek: number;
+  kmPerDay: unknown;
+  ratePerKm: unknown;
+  kmPerSaturday: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): WeeklyLimitRow {
+  return {
+    id: row.id,
+    isoYear: row.isoYear,
+    isoWeek: row.isoWeek,
+    kmPerDay: decimalToNumber(row.kmPerDay),
+    ratePerKm: decimalToNumber(row.ratePerKm),
+    kmPerSaturday: decimalToNumber(row.kmPerSaturday),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 /**
@@ -174,9 +176,8 @@ function decimalToNumber(value: unknown): number | null {
   }
   if (
     typeof value === 'object' &&
-    value !== null &&
     'toNumber' in value &&
-    typeof (value as { toNumber: () => number }).toNumber === 'function'
+    typeof (value as { toNumber: unknown }).toNumber === 'function'
   ) {
     const n = (value as { toNumber: () => number }).toNumber();
     return Number.isFinite(n) ? n : null;

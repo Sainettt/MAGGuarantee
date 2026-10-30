@@ -1,36 +1,43 @@
-// `<BulkLimitsDialog>` planning logic (docs/14 §16.4) — everything the dialog
-// needs to answer "what exactly will this button write?" WITHOUT touching
-// React.
+// Bulk editing planning (docs/14 §18.6.2) — everything the multi-week panel
+// needs to answer "what exactly will «Zastosuj do N tygodni» write?" WITHOUT
+// touching React: the payload, the per-week «Obecnie → Po zmianie» rows, the
+// in-tile before → after preview and the «Wypełnij wartościami tyg. N» fill.
 //
-// The bulk operation has THREE outcomes per field (set / disable / leave
-// alone), which is why the dialog uses a <Select> per km field rather than the
-// row's checkbox — a checkbox cannot express "don't touch". The same three-way
-// action drives the mandatory per-month «Obecnie → Po zmianie» summary built
-// here: overwriting twelve months with one click is irreversible, so the user
-// sees each cell's before/after first.
+// The operation has THREE outcomes per km field (set / disable / leave alone),
+// which is why the panel uses a <Select> per km field rather than a checkbox —
+// a checkbox cannot express "don't touch". «Nie ruszaj» and «ustaw 0» are two
+// different items. The rate has no on/off state: empty = no change.
 //
 // Pure, framework-free, unit-tested (`bulkPlan.test.ts`).
 
-import type { MonthlyLimitDto } from '@magguarantee/shared';
+import { parseLimitInput, type WeekLimitValues } from './limitState';
 
-import { parseLimitInput } from './limitState';
-
-export type BulkRangeMode = 'all' | 'range' | 'custom';
 export type BulkFieldAction = 'none' | 'set' | 'disable';
 
 export interface BulkFormValues {
-  mode: BulkRangeMode;
-  /** `range` mode bounds (1..12). Reversed bounds are swapped silently. */
-  from: number;
-  to: number;
-  /** `custom` mode selection (1..12, any order). */
-  months: number[];
   kmPerDayAction: BulkFieldAction;
   kmPerDayValue: string;
   kmPerSaturdayAction: BulkFieldAction;
   kmPerSaturdayValue: string;
   /** Empty string ⇒ "bez zmian" (the rate has no on/off state, §16.1). */
   ratePerKm: string;
+}
+
+export const EMPTY_BULK_FORM: BulkFormValues = Object.freeze({
+  kmPerDayAction: 'none',
+  kmPerDayValue: '',
+  kmPerSaturdayAction: 'none',
+  kmPerSaturdayValue: '',
+  ratePerKm: '',
+});
+
+/** The form differs from the untouched default (drives `errorNoChanges`). */
+export function isBulkFormTouched(values: BulkFormValues): boolean {
+  return (
+    values.kmPerDayAction !== 'none' ||
+    values.kmPerSaturdayAction !== 'none' ||
+    values.ratePerKm.trim() !== ''
+  );
 }
 
 export interface BulkPayload {
@@ -42,21 +49,6 @@ export interface BulkPayload {
 export type BulkPayloadResult =
   | { ok: true; payload: BulkPayload }
   | { ok: false; error: 'valueRequired' | 'noChanges' };
-
-const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-
-/** The months the operation addresses — always sorted, always deduped. */
-export function resolveMonths(values: BulkFormValues): number[] {
-  if (values.mode === 'all') return [...ALL_MONTHS];
-  if (values.mode === 'range') {
-    const lo = Math.min(values.from, values.to);
-    const hi = Math.max(values.from, values.to);
-    const out: number[] = [];
-    for (let m = lo; m <= hi; m += 1) out.push(m);
-    return out;
-  }
-  return [...new Set(values.months)].sort((a, b) => a - b);
-}
 
 /**
  * Build the wire payload. An omitted key means "leave that column alone" —
@@ -100,7 +92,30 @@ function fieldValue(
   return parsed.value;
 }
 
-// ── Per-month summary ───────────────────────────────────────────────
+/**
+ * «Wypełnij wartościami tyg. N» (fill-down): pre-fill the form from one week.
+ * A NULL value becomes «Bez zmian» — NULL is never copied; `0` becomes
+ * «Wyłącz (0 km)»; a number becomes «Włącz i ustaw» with that number. Only a
+ * pre-fill: nothing is written until «Zastosuj».
+ */
+export function fillFromWeek(values: WeekLimitValues): BulkFormValues {
+  const km = (value: number | null): [BulkFieldAction, string] => {
+    if (value == null) return ['none', ''];
+    if (value === 0) return ['disable', ''];
+    return ['set', String(value)];
+  };
+  const [kmPerDayAction, kmPerDayValue] = km(values.kmPerDay);
+  const [kmPerSaturdayAction, kmPerSaturdayValue] = km(values.kmPerSaturday);
+  return {
+    kmPerDayAction,
+    kmPerDayValue,
+    kmPerSaturdayAction,
+    kmPerSaturdayValue,
+    ratePerKm: values.ratePerKm == null ? '' : String(values.ratePerKm),
+  };
+}
+
+// ── Per-week summary ────────────────────────────────────────────────
 
 /**
  * A single cell of the «Obecnie → Po zmianie» table. `none` / `disabled` exist
@@ -114,56 +129,58 @@ export type BulkCellValue =
   | { kind: 'noChange' };
 
 export interface BulkSummaryCell {
+  /** Raw stored value (`null` = not configured) — the tile preview reads it. */
+  currentRaw: number | null;
   current: BulkCellValue;
   next: BulkCellValue;
+  /** The value that would be written, when this field is in the payload. */
+  nextRaw?: number;
   changed: boolean;
 }
 
 export interface BulkSummaryRow {
-  month: number;
+  isoWeek: number;
   kmPerDay: BulkSummaryCell;
   kmPerSaturday: BulkSummaryCell;
   ratePerKm: BulkSummaryCell;
   /** At least one column actually moves. */
   changed: boolean;
-  /** At least one column that moves currently holds a value (B or C). */
+  /** At least one column that moves currently holds a stored value (B or C). */
   overwrites: boolean;
 }
 
 export interface BulkSummary {
   rows: BulkSummaryRow[];
-  /** Months where something actually changes. */
+  /** Weeks where something actually changes. */
   changedCount: number;
-  /** Selected months where nothing changes. */
+  /** Selected weeks where nothing changes. */
   noopCount: number;
-  /** Months whose existing (non-NULL) values get overwritten. */
+  /** Weeks whose existing (non-NULL) values get overwritten. */
   overwriteCount: number;
 }
 
 export function buildBulkSummary(
-  months: readonly number[],
-  rowsByMonth: ReadonlyMap<number, MonthlyLimitDto>,
+  weeks: readonly number[],
+  valuesByWeek: (isoWeek: number) => WeekLimitValues,
   payload: BulkPayload,
 ): BulkSummary {
-  const rows = months.map((month) => {
-    const row = rowsByMonth.get(month) ?? null;
-    const kmPerDay = cell(row?.kmPerDay ?? null, payload.kmPerDay, true);
+  const rows = weeks.map((isoWeek) => {
+    const current = valuesByWeek(isoWeek);
+    const kmPerDay = cell(current.kmPerDay, payload.kmPerDay, 'km');
     const kmPerSaturday = cell(
-      row?.kmPerSaturday ?? null,
+      current.kmPerSaturday,
       payload.kmPerSaturday,
-      true,
+      'saturday',
     );
-    const ratePerKm = cell(row?.ratePerKm ?? null, payload.ratePerKm, false);
+    const ratePerKm = cell(current.ratePerKm, payload.ratePerKm, 'rate');
     const cells = [kmPerDay, kmPerSaturday, ratePerKm];
     return {
-      month,
+      isoWeek,
       kmPerDay,
       kmPerSaturday,
       ratePerKm,
       changed: cells.some((c) => c.changed),
-      overwrites: cells.some(
-        (c) => c.changed && c.current.kind !== 'none',
-      ),
+      overwrites: cells.some((c) => c.changed && c.currentRaw != null),
     } satisfies BulkSummaryRow;
   });
 
@@ -175,28 +192,45 @@ export function buildBulkSummary(
   };
 }
 
+type CellKind = 'km' | 'saturday' | 'rate';
+
 function cell(
   current: number | null,
   next: number | undefined,
-  offable: boolean,
+  kind: CellKind,
 ): BulkSummaryCell {
-  const currentValue = describe(current, offable);
+  const currentValue = describe(current, kind);
   if (next === undefined) {
-    return { current: currentValue, next: { kind: 'noChange' }, changed: false };
+    return {
+      currentRaw: current,
+      current: currentValue,
+      next: { kind: 'noChange' },
+      changed: false,
+    };
   }
-  const nextValue = describe(next, offable);
+  const nextValue = describe(next, kind);
   return {
+    currentRaw: current,
     current: currentValue,
     next: nextValue,
+    nextRaw: next,
     changed: !sameCell(currentValue, nextValue),
   };
 }
 
-function describe(value: number | null, offable: boolean): BulkCellValue {
+function describe(value: number | null, kind: CellKind): BulkCellValue {
+  // The Saturday's NULL and 0 are the same thing — "no Saturday guarantee"
+  // (its fallback is 0, §18.3) — so switching a NULL Saturday "off" is no
+  // change at all and must not be counted (or previewed as «— → —»).
+  if (kind === 'saturday') {
+    return value == null || value === 0
+      ? { kind: 'disabled' }
+      : { kind: 'number', value };
+  }
   if (value == null) return { kind: 'none' };
-  // `0` on a km column is "switched off"; on the rate column it is just a
-  // price of zero — the rate has no off state (§16.1).
-  if (offable && value === 0) return { kind: 'disabled' };
+  // `0` on km/day is "switched off"; on the rate it is just a price of zero —
+  // the rate has no off state (§16.1).
+  if (kind === 'km' && value === 0) return { kind: 'disabled' };
   return { kind: 'number', value };
 }
 

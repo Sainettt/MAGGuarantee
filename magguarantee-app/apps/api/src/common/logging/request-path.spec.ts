@@ -41,7 +41,7 @@ describe('request-path', () => {
       expect(sanitizePath(`/api/v1/vehicles/${uuid}/hard`)).toBe(
         `/api/v1/vehicles/${uuid}/hard`,
       );
-      expect(sanitizePath('/api/v1/limits/2026-09')).toBe('/api/v1/limits/2026-09');
+      expect(sanitizePath('/api/v1/limits/2026-W23')).toBe('/api/v1/limits/2026-W23');
       expect(sanitizePath('/api/v1/claims/GWA%2F001%2F05%2F26')).toBe(
         '/api/v1/claims/GWA%2F001%2F05%2F26',
       );

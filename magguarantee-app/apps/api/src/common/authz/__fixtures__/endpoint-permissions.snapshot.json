@@ -146,7 +146,7 @@
   "POST /vehicles/:id/deactivate": ["fleet.write"],
   "POST /vehicles/:id/planner-transfers": ["vehicles.planner_transfer.request"],
   "POST /vehicles/:id/reactivate": ["fleet.write"],
-  "PUT /limits/:yearMonth": ["limits.manage"],
+  "PUT /limits/:isoWeek": ["limits.manage"],
   "PUT /sso/stanowisko-roles/:code": ["sso.manage"],
   "PUT /vehicles/:id/daily-km": ["km.verify"]
 }

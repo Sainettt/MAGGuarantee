@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatLongDate,
   formatLongDateRange,
+  formatDateWithYear,
+  formatRangeWithYear,
   formatWeekDate,
   intlLocaleTag,
   isoWeekLabelParts,
@@ -155,5 +157,31 @@ describe('isoWeekLabelParts', () => {
         'pl',
       ),
     ).toBeNull();
+  });
+});
+
+describe('formatRangeWithYear (limits panel heading)', () => {
+  it('the end always carries the year, the start only when it differs', () => {
+    expect(formatRangeWithYear('2026-06-01', '2026-06-07', 'pl')).toBe(
+      '01.06–07.06.2026',
+    );
+    expect(formatRangeWithYear('2025-12-29', '2026-01-04', 'pl')).toBe(
+      '29.12.2025–04.01.2026',
+    );
+    expect(formatRangeWithYear('2026-06-01', '2026-06-07', 'en')).toBe(
+      '01/06–07/06/2026',
+    );
+  });
+
+  it('echoes garbage instead of «Invalid Date»', () => {
+    expect(formatRangeWithYear('x', 'y', 'pl')).toBe('x–y');
+  });
+});
+
+describe('formatDateWithYear (limits year span)', () => {
+  it('always prints the year', () => {
+    expect(formatDateWithYear('2025-12-29', 'pl')).toBe('29.12.2025');
+    expect(formatDateWithYear('2027-01-03', 'en')).toBe('03/01/2027');
+    expect(formatDateWithYear('nope', 'pl')).toBe('nope');
   });
 });

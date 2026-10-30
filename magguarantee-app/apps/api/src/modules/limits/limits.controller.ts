@@ -11,56 +11,61 @@ import {
 } from '@nestjs/common';
 
 import {
-  BulkUpdateMonthlyLimitsSchema,
-  ListMonthlyLimitsFiltersSchema,
-  UpdateMonthlyLimitSchema,
-  YearMonthParamSchema,
-  type BulkUpdateMonthlyLimitsDto,
-  type ListMonthlyLimitsFilters,
-  type MonthlyLimitDto,
-  type MonthlyLimitListDto,
-  type UpdateMonthlyLimitDto,
+  BulkUpdateWeeklyLimitsSchema,
+  IsoWeekParamSchema,
+  ListWeeklyLimitsFiltersSchema,
+  UpdateWeeklyLimitSchema,
+  formatIsoWeekKey,
+  type BulkUpdateWeeklyLimitsDto,
+  type ListWeeklyLimitsFilters,
+  type UpdateWeeklyLimitDto,
+  type WeeklyLimitDto,
+  type WeeklyLimitListDto,
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
+import { LIMITS_AUDIT } from './limits.constants';
 import { LimitsService } from './limits.service';
 
 /**
- * Audit `targetKey` for `POST /limits/bulk`: `2026-01..12` — the year plus the
- * first and last month TOUCHED (the full month list lives in `before`/`after`
- * and in `metadata.payload`, so the key only has to be human-scannable in the
- * audit list). Re-parses the raw body with the SAME schema the handler uses;
- * an unparseable body means the request 400'd and no row is written anyway.
+ * Audit `targetKey` for `POST /limits/bulk`: `2026-W10..W22` — the ISO year
+ * plus the first and last week TOUCHED (a single week gives `2026-W10..W10`;
+ * the full week list lives in `before`/`after` and `metadata.payload`, so the
+ * key only has to be human-scannable in the audit list). Re-parses the raw
+ * body with the SAME schema the handler uses; an unparseable body means the
+ * request 400'd and no row is written anyway.
  */
 function bulkTargetKey(body: unknown): string | undefined {
-  const parsed = BulkUpdateMonthlyLimitsSchema.safeParse(body);
+  const parsed = BulkUpdateWeeklyLimitsSchema.safeParse(body);
   if (!parsed.success) return undefined;
-  const months = [...parsed.data.months].sort((a, b) => a - b);
-  const first = months[0];
-  const last = months[months.length - 1];
-  if (first === undefined || last === undefined) return undefined;
-  const pad = (m: number): string => String(m).padStart(2, '0');
-  return `${parsed.data.year}-${pad(first)}..${pad(last)}`;
+  const { isoYear, weeks } = parsed.data;
+  const first = Math.min(...weeks);
+  const last = Math.max(...weeks);
+  const firstKey = formatIsoWeekKey(isoYear, first);
+  const lastKey = formatIsoWeekKey(isoYear, last);
+  if (firstKey === null || lastKey === null) return undefined;
+  // `2026-W22` → `W22`: the year is already in the first half of the range.
+  return `${firstKey}..${lastKey.slice(lastKey.indexOf('-') + 1)}`;
 }
 
 /**
- * Phase 4.5 — MonthlyLimit admin endpoints per
- * docs/13-api-design.md#limits.
+ * Km limits per ISO week — admin endpoints (docs/13-api-design.md «Limits —
+ * `/api/v1/limits`», 2026-10-29; the per-month `:yearMonth` routes are gone).
  *
- *  - `GET  /api/v1/limits?year=YYYY` — list raw rows for that year. Read-only,
- *    no audit, no transactions. Frontend handles gap-filling.
- *  - `PUT  /api/v1/limits/:yearMonth` — upsert one row by composite
- *    `(year, month)`. Body validated against `UpdateMonthlyLimitSchema`
- *    (at least one of `kmPerDay` / `ratePerKm` / `kmPerSaturday` required,
- *    all NON-NEGATIVE — `0` = "guarantee switched off for this month",
- *    omitted = "leave the column as it is"). Audit-tracked via
- *    `@Audit({action: 'limits.update'})` — the global `AuditInterceptor`
- *    wraps it in an ambient transaction so the row write + audit row commit
- *    atomically (pre-Phase-4.4 atomic-audit invariant).
- *  - `POST /api/v1/limits/bulk` — the same partial write applied to N months
- *    of one year inside that single transaction (`limits.bulkUpdate`).
+ *  - `GET  /api/v1/limits?year=YYYY` — the raw `weekly_limits` rows of that
+ *    ISO year, ascending by week. Read-only, no audit. The web fills the
+ *    weeks without a row in itself.
+ *  - `PUT  /api/v1/limits/:isoWeek` — partial upsert of one `(isoYear,
+ *    isoWeek)` row; `:isoWeek` = `YYYY-Www`. A malformed key or a week the
+ *    year does not have (`2027-W53`) is a 400 from `IsoWeekParamSchema`.
+ *    Audited as `limits.update`, `targetKey` = the key.
+ *  - `POST /api/v1/limits/bulk` — the same partial write applied to N weeks of
+ *    one ISO year (`limits.bulkUpdate`).
+ *
+ * Both writes run inside the ambient transaction the global `AuditInterceptor`
+ * opens, so the row(s) and the audit row commit atomically.
  *
  * All three endpoints are admin-only per `docs/03-roles.md#admin`: the class
  * requires `limits.manage` (`@RequirePermission`, docs/25 §3 B2; global
@@ -73,51 +78,48 @@ export class LimitsController {
 
   @Get()
   async list(
-    @Query(new ZodValidationPipe(ListMonthlyLimitsFiltersSchema))
-    query: ListMonthlyLimitsFilters,
-  ): Promise<MonthlyLimitListDto> {
-    return this.limits.listForYear(query.year);
+    @Query(new ZodValidationPipe(ListWeeklyLimitsFiltersSchema))
+    query: ListWeeklyLimitsFilters,
+  ): Promise<WeeklyLimitListDto> {
+    return this.limits.listForIsoYear(query.year);
   }
 
   /**
-   * `POST /limits/bulk` — apply one partial payload to several months of a
-   * single year, atomically.
+   * `POST /limits/bulk` — one partial payload on several weeks of a single ISO
+   * year, atomically: all weeks + the audit row commit in the ONE transaction
+   * the `AuditInterceptor` opens, so the web dialog only ever renders
+   * success/error — never a partial write. 200, not 201: nothing is "created"
+   * from the caller's point of view, rows are upserted.
    *
-   * With `0` meaning "guarantee switched off", turning a season off used to
-   * require twelve separate PUTs, and a single forgotten month silently kept
-   * paying the 540 km/day fallback. All months + the audit row commit in the
-   * ONE transaction the `AuditInterceptor` opens, so the web dialog only ever
-   * has to render success/error — never a partial write.
-   *
-   * Declared BEFORE `PUT /:yearMonth` for readability only — the verbs differ,
+   * Declared before `PUT /:isoWeek` for readability only — the verbs differ,
    * so there is no route-matching ambiguity.
    */
   @Post('bulk')
   @HttpCode(HttpStatus.OK)
   @Audit({
-    action: 'limits.bulkUpdate',
-    targetType: 'MonthlyLimit',
+    action: LIMITS_AUDIT.bulkUpdate,
+    targetType: LIMITS_AUDIT.targetType,
     targetKey: (req) => bulkTargetKey(req.body),
   })
   async bulkUpsert(
-    @Body(new ZodValidationPipe(BulkUpdateMonthlyLimitsSchema))
-    dto: BulkUpdateMonthlyLimitsDto,
-  ): Promise<MonthlyLimitListDto> {
+    @Body(new ZodValidationPipe(BulkUpdateWeeklyLimitsSchema))
+    dto: BulkUpdateWeeklyLimitsDto,
+  ): Promise<WeeklyLimitListDto> {
     return this.limits.bulkUpsert(dto);
   }
 
-  @Put(':yearMonth')
+  @Put(':isoWeek')
   @Audit({
-    action: 'limits.update',
-    targetType: 'MonthlyLimit',
-    targetKey: (req) => req.params?.yearMonth,
+    action: LIMITS_AUDIT.update,
+    targetType: LIMITS_AUDIT.targetType,
+    targetKey: (req) => req.params?.isoWeek,
   })
   async upsert(
-    @Param('yearMonth', new ZodValidationPipe(YearMonthParamSchema))
-    yearMonth: string,
-    @Body(new ZodValidationPipe(UpdateMonthlyLimitSchema))
-    dto: UpdateMonthlyLimitDto,
-  ): Promise<MonthlyLimitDto> {
-    return this.limits.upsert(yearMonth, dto);
+    @Param('isoWeek', new ZodValidationPipe(IsoWeekParamSchema))
+    isoWeek: string,
+    @Body(new ZodValidationPipe(UpdateWeeklyLimitSchema))
+    dto: UpdateWeeklyLimitDto,
+  ): Promise<WeeklyLimitDto> {
+    return this.limits.upsert(isoWeek, dto);
   }
 }

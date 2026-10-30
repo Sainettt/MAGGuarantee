@@ -123,7 +123,7 @@ describe('audit coverage (inverse) — every mutating route is audited or allowl
       'POST /claims',
       'PATCH /claims/:nrZgl',
       'DELETE /carriers/:id/hard',
-      'PUT /limits/:yearMonth',
+      'PUT /limits/:isoWeek',
       'POST /auth/logout',
       'GET /health',
     ]) {

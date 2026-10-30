@@ -1,10 +1,14 @@
-// The `<LimitsRow>` guarantee-cell state machine (docs/14 §16.3), extracted so
-// the mechanics that MUST hold can be unit-tested without a DOM:
+// The guarantee-field state machine (docs/14 §16.3), extracted so the
+// mechanics that MUST hold can be unit-tested without a DOM. Since 2026-10-29
+// it drives the km/day and km/Saturday fields of `<WeekEditPanel>` (one ISO
+// week, §18.5.1) — reused as is from the old monthly `<LimitsRow>`:
 //
 //   • un-ticking the box WRITES `0` immediately;
 //   • ticking the box WRITES NOTHING — it unlocks the input and enters the
-//     `unsaved` draft state (writing NULL there would hand the month back the
+//     `unsaved` draft state (writing NULL there would hand the week back the
 //     540 km/day fallback, the exact trap this feature removes);
+//   • typing `0` into an enabled field writes `0` — the box un-ticks itself
+//     once the value lands (§18.5.1 «Ввести 0 = выключить»);
 //   • blurring an empty / invalid field un-ticks the box again and announces
 //     it, instead of writing anything;
 //   • the last positive value is remembered for the session and pre-filled as
@@ -26,7 +30,7 @@ export interface GuaranteeCellState {
   nullMeansOff: boolean;
   /** Current input buffer. */
   text: string;
-  /** Box ticked over an off month, nothing written yet. */
+  /** Box ticked over an off week, nothing written yet. */
   draft: boolean;
   /** Last `> 0` value seen this session (session memory, never persisted). */
   lastPositive: number | null;
@@ -53,7 +57,7 @@ export function isOff(state: GuaranteeCellState): boolean {
   return state.value === 0;
 }
 
-/** Is the checkbox ticked? (server-on, or a local draft over an off month) */
+/** Is the checkbox ticked? (server-on, or a local draft over an off week) */
 export function isChecked(state: GuaranteeCellState): boolean {
   return !isOff(state) || state.draft;
 }

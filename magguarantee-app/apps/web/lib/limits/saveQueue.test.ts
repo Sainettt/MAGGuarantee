@@ -1,4 +1,4 @@
-// Serialization of same-month writes — the checkbox × save-on-blur race.
+// Serialization of same-week writes (key `YYYY-Www`) — the checkbox × save-on-blur race.
 
 import { describe, expect, it } from 'vitest';
 
@@ -22,12 +22,12 @@ describe('createSerialQueue', () => {
     const second = deferred<void>();
 
     // Gesture order: the blur commit is enqueued first, the checkbox second.
-    const blur = queue.run('2026-02', async () => {
+    const blur = queue.run('2026-W02', async () => {
       log.push('blur:start');
       await first.promise;
       log.push('blur:end');
     });
-    const toggle = queue.run('2026-02', async () => {
+    const toggle = queue.run('2026-W02', async () => {
       log.push('toggle:start');
       await second.promise;
       log.push('toggle:end');
@@ -52,57 +52,88 @@ describe('createSerialQueue', () => {
     ]);
   });
 
-  it('keeps different months parallel', async () => {
+  it('keeps different weeks parallel', async () => {
     const queue = createSerialQueue();
     const log: string[] = [];
     const jan = deferred<void>();
 
-    const a = queue.run('2026-01', async () => {
-      log.push('jan:start');
+    const a = queue.run('2026-W01', async () => {
+      log.push('w01:start');
       await jan.promise;
-      log.push('jan:end');
+      log.push('w01:end');
     });
-    const b = queue.run('2026-02', async () => {
-      log.push('feb:start');
+    const b = queue.run('2026-W02', async () => {
+      log.push('w02:start');
     });
 
     await b;
-    expect(log).toEqual(['jan:start', 'feb:start']);
+    expect(log).toEqual(['w01:start', 'w02:start']);
     jan.resolve();
     await a;
   });
 
   it('a rejected task does not poison the queue', async () => {
     const queue = createSerialQueue();
-    const failing = queue.run('2026-03', () =>
+    const failing = queue.run('2026-W03', () =>
       Promise.reject(new Error('boom')),
     );
     await expect(failing).rejects.toThrow('boom');
 
-    const after = await queue.run('2026-03', () => Promise.resolve('ok'));
+    const after = await queue.run('2026-W03', () => Promise.resolve('ok'));
     expect(after).toBe('ok');
   });
 
   it('reports pending work per key and clears it when idle', async () => {
     const queue = createSerialQueue();
     const gate = deferred<void>();
-    const task = queue.run('2026-04', () => gate.promise);
+    const task = queue.run('2026-W04', () => gate.promise);
 
-    expect(queue.pending('2026-04')).toBe(1);
-    expect(queue.pending('2026-05')).toBe(0);
+    expect(queue.pending('2026-W04')).toBe(1);
+    expect(queue.pending('2026-W05')).toBe(0);
 
     gate.resolve();
     await task;
     // Give the internal bookkeeping its microtask.
     await Promise.resolve();
     await Promise.resolve();
-    expect(queue.pending('2026-04')).toBe(0);
+    expect(queue.pending('2026-W04')).toBe(0);
+  });
+
+  it('notifies subscribers on every pending change and counts all keys', async () => {
+    const queue = createSerialQueue();
+    const seen: number[] = [];
+    const unsubscribe = queue.subscribe(() => seen.push(queue.totalPending()));
+    const gate = deferred<void>();
+    const versionBefore = queue.getVersion();
+
+    const a = queue.run('2026-W10', () => gate.promise);
+    const b = queue.run('2026-W11', () => Promise.resolve());
+    expect(queue.totalPending()).toBe(2);
+    expect(queue.getVersion()).toBeGreaterThan(versionBefore);
+
+    await b;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(queue.totalPending()).toBe(1);
+
+    gate.resolve();
+    await a;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(queue.totalPending()).toBe(0);
+    expect(seen).toEqual([1, 2, 1, 0]);
+
+    unsubscribe();
+    await queue.run('2026-W12', () => Promise.resolve());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual([1, 2, 1, 0]);
   });
 
   it('propagates each task own result, not the predecessor own', async () => {
     const queue = createSerialQueue();
-    const first = queue.run('2026-06', () => Promise.reject(new Error('one')));
-    const second = queue.run('2026-06', () => Promise.resolve(2));
+    const first = queue.run('2026-W06', () => Promise.reject(new Error('one')));
+    const second = queue.run('2026-W06', () => Promise.resolve(2));
     await expect(first).rejects.toThrow('one');
     await expect(second).resolves.toBe(2);
   });

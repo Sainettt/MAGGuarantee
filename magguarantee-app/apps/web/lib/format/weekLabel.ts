@@ -65,6 +65,32 @@ export function formatWeekDate(
   }).format(date);
 }
 
+/**
+ * Short range whose END always carries its year, the start only when its year
+ * differs: `01.06–07.06.2026`, `29.12.2025–04.01.2026` (the limits panel
+ * heading, docs/14 §18.5.1 «дата с годом»). Parsed as local calendar days.
+ */
+export function formatRangeWithYear(
+  fromIso: string,
+  toIso: string,
+  locale: string,
+): string {
+  const to = parseLocalIsoDate(toIso);
+  if (!to) return `${fromIso}–${toIso}`;
+  return `${formatWeekDate(fromIso, locale, to.getFullYear())}–${formatDateWithYear(toIso, locale)}`;
+}
+
+/** `03.01.2027` (pl) / `03/01/2027` (en); garbage is echoed. */
+export function formatDateWithYear(iso: string, locale: string): string {
+  const date = parseLocalIsoDate(iso);
+  if (!date) return iso;
+  return new Intl.DateTimeFormat(intlLocaleTag(locale), {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
 const LONG_DATE: Intl.DateTimeFormatOptions = {
   day: 'numeric',
   month: 'long',

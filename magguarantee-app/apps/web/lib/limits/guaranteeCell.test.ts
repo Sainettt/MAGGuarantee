@@ -35,20 +35,20 @@ describe('checked / off derivation', () => {
     expect(isChecked(s)).toBe(false);
   });
 
-  it('a draft over an off month reads as checked', () => {
+  it('a draft over an off week reads as checked', () => {
     expect(isChecked(state({ value: 0, text: '', draft: true }))).toBe(true);
   });
 });
 
 describe('un-ticking writes 0 immediately', () => {
-  it('from an active month', () => {
+  it('from an active week', () => {
     const action = toggleGuarantee(state({ value: 540, text: '540' }), false);
     expect(action.write).toBe(0);
     expect(action.draft).toBe(false);
     expect(action.remember).toBe(540);
   });
 
-  it('from an UNCONFIGURED month (NULL → 0, never back to NULL)', () => {
+  it('from an UNCONFIGURED week (NULL → 0, never back to NULL)', () => {
     const action = toggleGuarantee(state({ value: null, text: '' }), false);
     expect(action.write).toBe(0);
   });
@@ -121,7 +121,7 @@ describe('blur', () => {
     expect(action.draft).toBe(true);
   });
 
-  it('an explicit 0 typed into an ACTIVE cell switches the month off', () => {
+  it('an explicit 0 typed into an ACTIVE cell switches the week off', () => {
     const action = commitOnBlur(state({ value: 540, text: '0' }));
     expect(action.write).toBe(0);
   });
